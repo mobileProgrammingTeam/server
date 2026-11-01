@@ -1,0 +1,27 @@
+:root { color-scheme: light; font-family: system-ui, sans-serif; color: #1d2939; background: #f5f7fa; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+header { background: #15324f; color: white; display: flex; align-items: center; gap: 2rem; padding: 1rem 5%; }
+header a { color: white; text-decoration: none; }
+header .brand { font-weight: 700; white-space: nowrap; }
+nav { display: flex; flex-wrap: wrap; gap: 1rem; flex: 1; }
+main { max-width: 1200px; margin: 2rem auto; padding: 0 1rem; }
+h1 { font-size: 1.7rem; } h2 { font-size: 1.2rem; }
+section { background: white; border: 1px solid #dde4ec; border-radius: 8px; padding: 1rem; margin-bottom: 1rem; }
+.cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
+.cards section { display: flex; flex-direction: column; gap: .5rem; }
+.cards strong { font-size: 2rem; }
+label { display: grid; gap: .3rem; font-size: .9rem; }
+input, select, button { font: inherit; padding: .6rem .75rem; border: 1px solid #bbc8d6; border-radius: 5px; }
+button { background: #205b89; color: white; border-color: #205b89; cursor: pointer; }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button.secondary { color: #244661; background: white; border-color: #bbc8d6; }
+.toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: .8rem; }
+.table-wrap { overflow-x: auto; background: white; }
+table { width: 100%; border-collapse: collapse; white-space: nowrap; }
+th, td { padding: .8rem; text-align: left; border-bottom: 1px solid #e6ebf0; }
+th { background: #eff4f8; }
+.pagination { display: flex; align-items: center; gap: 1rem; margin: 1rem 0; }
+.login { max-width: 420px; margin: 8vh auto; background: white; border: 1px solid #dde4ec; border-radius: 8px; padding: 2rem; }
+.login form { display: grid; gap: 1rem; } .error { color: #a42828; } .notice { overflow-wrap: anywhere; font-weight: 600; }
+@media (max-width: 620px) { header { flex-wrap: wrap; gap: .8rem; } nav { order: 3; flex-basis: 100%; } .cards { grid-template-columns: 1fr; gap: 0; } }

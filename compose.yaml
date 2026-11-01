@@ -1,0 +1,15 @@
+services:
+  server:
+    build: .
+    environment:
+      ADMIN_LOGIN_ID: ${ADMIN_LOGIN_ID:-}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
+      MOBILE_TOKEN_TTL: ${MOBILE_TOKEN_TTL:-PT12H}
+      SERVER_PORT: 8080
+    ports:
+      - "${SERVER_PORT:-8080}:8080"
+    volumes:
+      - safety-data:/data
+    restart: unless-stopped
+volumes:
+  safety-data:

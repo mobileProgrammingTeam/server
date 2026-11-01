@@ -31,3 +31,9 @@ build/
 
 ### VS Code ###
 .vscode/
+
+/data/
+.env
+*.db
+*.db-wal
+*.db-shm

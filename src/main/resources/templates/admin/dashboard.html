@@ -1,0 +1,6 @@
+<!doctype html>
+<html lang="ko" xmlns:th="http://www.thymeleaf.org">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>대시보드</title><link rel="stylesheet" th:href="@{/css/admin.css}"><script defer th:src="@{/js/admin.js}"></script></head>
+<body><header><a class="brand" th:href="@{/admin/dashboard}">안전 관리</a><nav><a th:href="@{/admin/dashboard}">대시보드</a><a th:href="@{/admin/events}">이벤트</a><a th:href="@{/admin/workers}">작업자</a></nav><form th:action="@{/admin/logout}" method="post"><button class="secondary">로그아웃</button></form></header>
+<main><h1>대시보드</h1><div class="cards"><section><span>활성 작업자</span><strong th:text="${dashboard.workerCount}">0</strong></section><section><span>전체 이벤트</span><strong th:text="${dashboard.eventCount}">0</strong></section><section><span>미처리 이벤트</span><strong th:text="${dashboard.pendingCount}">0</strong></section></div>
+<section><h2>최근 이벤트</h2><div class="table-wrap"><table><thead><tr><th>발생 시각</th><th>유형</th><th>작업자</th><th>처리 상태</th></tr></thead><tbody><tr th:each="event : ${dashboard.recentEvents}"><td th:attr="data-time=${event.time}" th:text="${event.time}"></td><td th:text="${event.eventType}"></td><td th:text="${event.workerName}"></td><td th:text="${event.processedAt == null ? '미처리' : '완료'}"></td></tr></tbody></table></div></section></main></body></html>

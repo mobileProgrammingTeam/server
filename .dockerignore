@@ -1,0 +1,9 @@
+.git
+.idea
+target
+data
+.env
+*.db
+*.db-wal
+*.db-shm
+*.iml

@@ -20,11 +20,13 @@
 | `MOBILE_TOKEN_TTL` | 모바일 토큰 유효 기간 | `PT12H` |
 | `SPRING_PROFILES_ACTIVE` | 실행 프로필 | 로컬 `local`, Docker `prod` |
 
-관리자 비밀번호는 12~64자이고 UTF-8 72바이트 이하여야 합니다. 기존 관리자 계정이 있으면 환경변수 값으로 덮어쓰지 않습니다. `.env.example`은 설명용이며 Spring Boot가 `.env`를 자동으로 읽지는 않습니다. Docker Compose는 `.env`를 읽습니다. IntelliJ에서는 Run Configuration의 환경변수 항목에 직접 설정하세요.
+관리자 비밀번호는 12~64자이고 UTF-8 72바이트 이하여야 합니다. 기존 관리자 계정이 있으면 초기 자격증명으로 덮어쓰지 않습니다. 기본 `local` 프로필은 프로젝트 작업 디렉터리의 `.env`를 UTF-8 Java Properties 형식으로 읽습니다. OS·IntelliJ 환경변수와 명령행 설정은 파일 값보다 우선합니다. `.env`는 선택 사항이며, 파일이 없으면 기존 환경변수 주입 방식으로 실행할 수 있습니다. 최초 관리자 계정이 없을 때 두 관리자 값이 모두 필요합니다.
+
+`.env`는 `KEY=value` 형식으로 작성하고 값에 따옴표를 붙이거나 `export`를 쓰지 마세요. Java Properties의 이스케이프 규칙이 적용되므로 백슬래시가 포함된 값은 주의하고 Windows 경로에는 `/` 사용을 권장합니다. Docker Compose도 `.env`를 읽지만 보간 문법이 다를 수 있으니 특수문자 비밀번호는 Compose 동작을 별도로 확인하세요. `.env`와 실제 비밀값은 Git에 저장하지 않습니다.
 
 ## 로컬 실행
 
-JDK 17을 설정한 PowerShell에서 최초 관리자 정보를 환경변수에 주입한 후 실행합니다.
+JDK 17과 프로젝트 루트 작업 디렉터리를 사용합니다. `.env.example`을 프로젝트 루트의 `.env`로 복사하고 `ADMIN_LOGIN_ID`, `ADMIN_INITIAL_PASSWORD`에 최초 관리자 정보를 입력한 뒤 IntelliJ에서 실행하면 됩니다. IntelliJ의 Run Configuration에서 Working directory가 프로젝트 루트인지 확인하세요. 파일을 추가하거나 수정한 뒤 서버를 재시작해야 설정이 다시 읽힙니다. `.env` 없이 실행하려면 다음과 같이 환경변수로 전달할 수 있습니다.
 
 ```powershell
 $env:ADMIN_LOGIN_ID = Read-Host '관리자 로그인 ID'

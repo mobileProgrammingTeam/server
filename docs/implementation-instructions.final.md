@@ -290,7 +290,9 @@ CHECK (
 | `MOBILE_TOKEN_TTL` | `PT12H` |
 | `SPRING_PROFILES_ACTIVE` | `local` 또는 `prod`; 테스트는 별도 설정 |
 
-- `.env.example`은 변수명과 설명을 제공한다. Spring Boot가 `.env`를 자동으로 읽는다고 가정하지 않고 PowerShell·IntelliJ·Compose별 주입 방법을 README에 쓴다.
+- 기본 `local` 프로필은 프로젝트 작업 디렉터리의 `.env`를 UTF-8 Java Properties로 선택적으로 읽는다. 이 동작은 `application-local.properties`의 Config Data import로 구현하며 추가 dotenv 의존성을 넣지 않는다. `.env` 없이도 OS·IntelliJ 환경변수 주입으로 실행할 수 있다.
+- `prod`와 `test`는 로컬 `.env`를 자동 import하지 않는다. Docker Compose는 자체 `.env` 보간으로 값을 컨테이너 환경변수에 전달한다. 파일 값보다 OS 환경변수·Java 시스템 속성·명령행 값이 우선한다.
+- `.env.example`은 IntelliJ 로컬 실행과 Compose에서 쓸 변수 예시다. Java Properties 문법(인용부호·`export` 접두사 없이 `KEY=value`)과 Compose 보간의 특수문자 차이를 README에 설명한다. `.env` 및 비밀값은 Git·이미지·로그에 넣지 않는다.
 - DB 디렉터리·환경파일·비밀값을 Git에서 제외한다. WAL·SHM 파일까지 포함하도록 DB 저장 디렉터리 전체를 제외하고 `.dockerignore`에도 반영한다.
 - Dockerfile은 선택한 Java 버전의 빌드·실행 이미지를 일치시킨다. DevTools를 배포 실행에 포함하지 않고, 비루트 사용자에게 `/data` 쓰기 권한을 준다.
 - Compose가 필요하면 단일 앱 서비스와 `/data` 영구 볼륨만 둔다. Spring Boot Docker Compose Support는 추가하지 않는다.

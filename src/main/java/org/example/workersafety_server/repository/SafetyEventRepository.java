@@ -13,6 +13,7 @@ public interface SafetyEventRepository extends JpaRepository<SafetyEvent, Long>,
     long countByProcessedAtIsNull();
 
     @Modifying(clearAutomatically = true, flushAutomatically = true)
-    @Query("update SafetyEvent e set e.processedAt = :now, e.processedBy = :admin where e.id = :id and e.processedAt is null")
-    int process(@Param("id") long id, @Param("admin") Account admin, @Param("now") Instant now);
+    @Query("update SafetyEvent e set e.processedAt = :now, e.processedBy = :admin, e.adminMemo = :memo where e.id = :id and e.processedAt is null")
+    int process(@Param("id") long id, @Param("admin") Account admin,
+                @Param("now") Instant now, @Param("memo") String memo);
 }

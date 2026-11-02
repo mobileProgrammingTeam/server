@@ -28,8 +28,10 @@ public final class ApiModels {
     }
     public record NewEvent(@NotNull Instant time, @NotNull EventType eventType,
                            @NotBlank @Size(max = 100) String alertSender) { }
+    public record ProcessEventRequest(@NotBlank String adminMemo) { }
     public record EventInfo(Long eventId, Long workerId, String workerName, Instant time, Instant receivedAt,
-                            EventType eventType, String alertSender, Instant processedAt, Long processedBy) { }
+                            EventType eventType, String alertSender, Instant processedAt, Long processedBy,
+                            String adminMemo) { }
     public record PageResponse<T>(List<T> items, int page, int size, long totalElements, int totalPages) { }
     public record ErrorResponse(String code, String message) { }
     public record Dashboard(long workerCount, long eventCount, long pendingCount, List<EventInfo> recentEvents) { }

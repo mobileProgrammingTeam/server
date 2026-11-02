@@ -12,5 +12,6 @@ public class ApiException extends RuntimeException {
     public String code() { return code; }
     public static ApiException badRequest(String message) { return new ApiException(HttpStatus.BAD_REQUEST, "INVALID_REQUEST", message); }
     public static ApiException unauthorized() { return new ApiException(HttpStatus.UNAUTHORIZED, "AUTHENTICATION_FAILED", "인증에 실패했습니다."); }
+    public static ApiException conflict(String code, String message) { return new ApiException(HttpStatus.CONFLICT, code, message); }
     public static ApiException notFound(String code, String message) { return new ApiException(HttpStatus.NOT_FOUND, code, message); }
 }

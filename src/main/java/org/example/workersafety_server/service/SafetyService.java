@@ -205,9 +205,15 @@ public class SafetyService {
     }
 
     @Transactional
-    public EventInfo processEvent(long id, String adminLogin) {
+    public EventInfo processEvent(long id, String adminLogin, String memo) {
         Account admin = admin(adminLogin);
-        events.process(id, admin, now());
+        String normalizedMemo = memo.trim();
+        if (normalizedMemo.isEmpty() || normalizedMemo.length() > 500)
+            throw ApiException.badRequest("처리 메모는 공백을 제외하고 1~500자여야 합니다.");
+        if (events.process(id, admin, now(), normalizedMemo) == 0) {
+            findEvent(id);
+            throw ApiException.conflict("EVENT_ALREADY_PROCESSED", "이미 처리된 이벤트입니다.");
+        }
         return eventInfo(findEvent(id));
     }
 
@@ -239,7 +245,7 @@ public class SafetyService {
         return events.findById(id).orElseThrow(() -> ApiException.notFound("EVENT_NOT_FOUND", "이벤트를 찾을 수 없습니다."));
     }
     private WorkerInfo workerInfo(WorkerProfile p) { return new WorkerInfo(p.getId(), p.getWorkerName(), p.getSex(), p.getAge(), p.getAccount().isEnabled()); }
-    private EventInfo eventInfo(SafetyEvent e) { return new EventInfo(e.getId(), e.getWorker().getId(), e.getWorker().getWorkerName(), e.getOccurredAt(), e.getReceivedAt(), e.getEventType(), e.getAlertSender(), e.getProcessedAt(), e.getProcessedBy() == null ? null : e.getProcessedBy().getId()); }
+    private EventInfo eventInfo(SafetyEvent e) { return new EventInfo(e.getId(), e.getWorker().getId(), e.getWorker().getWorkerName(), e.getOccurredAt(), e.getReceivedAt(), e.getEventType(), e.getAlertSender(), e.getProcessedAt(), e.getProcessedBy() == null ? null : e.getProcessedBy().getId(), e.getAdminMemo()); }
     private Pageable pageable(int page, int size, Sort sort) {
         if (page < 0 || size < 1 || size > 100) throw ApiException.badRequest("페이지 값을 확인하세요.");
         return PageRequest.of(page, size, sort);

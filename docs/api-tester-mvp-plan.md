@@ -75,16 +75,17 @@ python tools/api_tester.py
 | 11 | `GET /api/admin/events` | 200 | 테스트 작업자의 이벤트 목록 조회 |
 | 12 | `GET /api/admin/events/{eventId}` | 200 | 등록한 이벤트 상세 조회 |
 | 13 | `PATCH /api/admin/events/{eventId}/process` | 200 | 이벤트 처리 완료 |
-| 14 | `POST /api/worker/auth/logout` | 204 | 현재 작업자 토큰 폐기 |
-| 15 | `POST /api/worker/auth/login` | 200 | 기존 임시 비밀번호로 재로그인 |
-| 16 | `PATCH /api/worker/me/password` | 204 | 비밀번호 변경, 메모리의 현재 토큰 제거 |
-| 17 | `POST /api/worker/auth/login` | 200 | 변경한 비밀번호로 재로그인 |
-| 18 | `POST /api/admin/workers/{workerId}/reset-password` | 200 | 초기화된 비밀번호 저장, 작업자 토큰 제거 |
-| 19 | `POST /api/worker/auth/login` | 200 | 초기화된 임시 비밀번호로 재로그인 |
-| 20 | `DELETE /api/worker/me` | 204 | 현재 비밀번호를 JSON 본문으로 보내 탈퇴 |
-| 21 | `POST /admin/logout` | 302 | 관리자 세션 종료 |
+| 14 | `GET /api/admin/events/{eventId}` | 200 | 재조회하여 메모가 저장됐는지 확인 |
+| 15 | `POST /api/worker/auth/logout` | 204 | 현재 작업자 토큰 폐기 |
+| 16 | `POST /api/worker/auth/login` | 200 | 기존 임시 비밀번호로 재로그인 |
+| 17 | `PATCH /api/worker/me/password` | 204 | 비밀번호 변경, 메모리의 현재 토큰 제거 |
+| 18 | `POST /api/worker/auth/login` | 200 | 변경한 비밀번호로 재로그인 |
+| 19 | `POST /api/admin/workers/{workerId}/reset-password` | 200 | 초기화된 비밀번호 저장, 작업자 토큰 제거 |
+| 20 | `POST /api/worker/auth/login` | 200 | 초기화된 임시 비밀번호로 재로그인 |
+| 21 | `DELETE /api/worker/me` | 204 | 현재 비밀번호를 JSON 본문으로 보내 탈퇴 |
+| 22 | `POST /admin/logout` | 302 | 관리자 세션 종료 |
 
-총 21회 요청으로 14개 REST API와 인증에 필요한 경로를 모두 사용한다. 작업자 로그인은 토큰 무효화에 맞춰 반복 호출한다.
+총 22회 요청으로 14개 REST API와 인증에 필요한 경로를 모두 사용한다. 작업자 로그인은 토큰 무효화에 맞춰 반복 호출한다.
 
 ## 4. 인증과 요청 처리
 
@@ -113,7 +114,8 @@ python tools/api_tester.py
 | 작업자 목록 | `items`가 배열이며 페이지 필드 존재. 새 작업자가 첫 페이지에 있다는 가정은 하지 않음 |
 | 이벤트 등록·상세 | 양의 이벤트 ID, 생성한 작업자 ID, 보낸 유형·발신 주체와 일치 |
 | 이벤트 목록 | `items`에 이번 실행에서 생성한 이벤트 ID 포함 |
-| 이벤트 처리 | 동일 이벤트 ID, 비어 있지 않은 `processedAt`, 양의 정수 `processedBy` |
+| 이벤트 처리 | `adminMemo`와 함께 처리 요청, 동일 이벤트 ID, 비어 있지 않은 `processedAt`, 양의 정수 `processedBy` |
+| 처리 메모 확인 | 처리 후 이벤트 상세를 다시 조회해 `adminMemo`가 유지되는지 확인 |
 | 작업자 로그아웃·비밀번호 변경·탈퇴 | `204`이고 본문이 비어 있음 |
 
 페이지 정렬, 입력 경계값, 토큰 만료, 이전 토큰의 실제 무효화 여부까지 반복 검증하는 기능은 추가하지 않는다.
@@ -138,6 +140,7 @@ POST /api/worker/events OK
 GET /api/admin/events OK
 GET /api/admin/events/87 OK
 PATCH /api/admin/events/87/process OK
+GET /api/admin/events/87 OK
 ```
 
 경로의 ID는 템플릿 대신 실제 사용한 값으로 표시한다. 성공 행에서는 쿼리를 생략하고, 실패 상세에는 포함한다.
@@ -195,14 +198,14 @@ MVP는 첫 `KO`에서 종료한다. 앞 단계에서 얻은 ID·토큰을 후속
 
 | 함수 | 역할 |
 | --- | --- |
-| `main()` | 입력, 21회 요청 순서, ID·비밀번호·토큰 관리 |
+| `main()` | 입력, 22회 요청 순서, ID·비밀번호·토큰 관리 |
 | `request_and_check()` | 요청 전송, 상태·최소 내용 검증, OK·KO 출력 및 실패 종료 |
 | `read_csrf()` | HTML의 CSRF 필드 또는 meta 정보 추출 |
 | `print_failure()` | 비밀값을 숨기고 실제 요청·응답 상세 출력 |
 
 1. **공통 요청·출력 처리** → `/health` 성공은 한 줄, 서버 연결 실패는 `KO`와 상세 정보가 출력되는지 확인한다.
 2. **관리자 인증·작업자 생성** → CSRF·쿠키를 사용하고 생성한 ID로 작업자 상세를 조회하는지 확인한다.
-3. **나머지 API 추가** → 테스트 서버에서 21회 요청이 모두 성공하고 14개 REST API가 빠짐없이 실행되는지 확인한다.
+3. **나머지 API 추가** → 테스트 서버에서 22회 요청이 모두 성공하고 14개 REST API가 빠짐없이 실행되는지 확인한다.
 4. **실패 출력 확인** → 틀린 관리자 비밀번호 또는 확인용 잘못된 요청으로 실패시켜, 요청·응답·이유가 보이고 비밀값은 숨겨지는지 확인한다.
 
 별도 테스트 프레임워크는 도입하지 않는다. 정상 실행과 실패 실행의 출력·종료 코드로 확인한다.
@@ -210,7 +213,7 @@ MVP는 첫 `KO`에서 종료한다. 앞 단계에서 얻은 ID·토큰을 후속
 ## 완료 기준
 
 - 시작 시 서버 주소·관리자 ID·비밀번호만 입력한다.
-- 현재 14개 REST API를 의존관계에 맞춰 자동 순차 실행한다.
+- 현재 14개 REST API를 포함한 22회 요청을 의존관계에 맞춰 자동 순차 실행한다.
 - 성공은 `메서드 경로 OK`만 출력한다.
 - 실패는 `메서드 경로 KO`와 보낸 요청·받은 응답·실패 이유를 상세히 표시한다.
 - 첫 실패에서 종료하고 자동 재시도하지 않는다.

@@ -16,4 +16,5 @@ public class SafetyEvent {
     @Column(name = "alert_sender", nullable = false) private String alertSender;
     @Column(name = "processed_at") private Instant processedAt;
     @ManyToOne(fetch = FetchType.LAZY) @JoinColumn(name = "processed_by") private Account processedBy;
+    @Column(name = "admin_memo", length = 500) private String adminMemo;
 }

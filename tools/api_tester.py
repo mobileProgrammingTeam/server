@@ -232,18 +232,33 @@ def check_event_list(data, event_id):
 
 def check_event_detail(data, event_id, worker_id):
     body = require_fields(
-        data, ("eventId", "workerId", "eventType", "alertSender", "processedAt"), "이벤트 상세",
+        data, ("eventId", "workerId", "eventType", "alertSender", "processedAt", "adminMemo"),
+        "이벤트 상세",
     )
     if (body["eventId"], body["workerId"], body["eventType"], body["alertSender"],
-            body["processedAt"]) != (event_id, worker_id, "FALL_DETECTED", "API_TESTER", None):
+            body["processedAt"], body["adminMemo"]) != (
+            event_id, worker_id, "FALL_DETECTED", "API_TESTER", None, None):
         raise ValueError("이벤트 상세 응답이 생성 요청과 일치하지 않습니다.")
 
 
-def check_processed_event(data, event_id):
-    body = require_fields(data, ("eventId", "processedAt", "processedBy"), "이벤트 처리")
+def check_processed_event(data, event_id, memo):
+    body = require_fields(data, ("eventId", "processedAt", "processedBy", "adminMemo"), "이벤트 처리")
     if body["eventId"] != event_id or not body["processedAt"]:
         raise ValueError("이벤트 처리 응답에 처리 정보가 없습니다.")
+    if body["adminMemo"] != memo:
+        raise ValueError("이벤트 처리 응답에 저장된 메모가 없습니다.")
     require_positive_id(body, "processedBy", "이벤트 처리")
+
+
+def check_processed_detail(data, event_id, worker_id, memo):
+    body = require_fields(
+        data, ("eventId", "workerId", "processedAt", "processedBy", "adminMemo"),
+        "처리 이벤트 상세",
+    )
+    if (body["eventId"], body["workerId"], body["adminMemo"]) != (
+            event_id, worker_id, memo) or not body["processedAt"]:
+        raise ValueError("이벤트 상세 조회에서 처리 메모가 일치하지 않습니다.")
+    require_positive_id(body, "processedBy", "처리 이벤트 상세")
 
 
 def check_reset_password(data, worker_id):
@@ -366,10 +381,19 @@ def main():
                 check=lambda response, data: check_event_detail(data, event_id, worker_id),
             )
 
+            admin_memo = "API 테스터 처리 확인"
             request_and_check(
                 admin, "PATCH", f"/api/admin/events/{event_id}/process", 200,
                 base_url=base_url, headers=admin_headers,
-                check=lambda response, data: check_processed_event(data, event_id),
+                json_body={"adminMemo": admin_memo},
+                check=lambda response, data: check_processed_event(data, event_id, admin_memo),
+            )
+
+            request_and_check(
+                admin, "GET", f"/api/admin/events/{event_id}", 200, base_url=base_url,
+                check=lambda response, data: check_processed_detail(
+                    data, event_id, worker_id, admin_memo
+                ),
             )
 
             request_and_check(

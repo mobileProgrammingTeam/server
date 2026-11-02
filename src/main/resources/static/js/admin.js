@@ -40,12 +40,15 @@
                     const row = document.createElement('tr');
                     cell(row, time(event.time)); cell(row, event.eventType); cell(row, `${event.workerName} (${event.workerId})`);
                     cell(row, event.alertSender); cell(row, event.processedAt ? '완료' : '미처리'); cell(row, time(event.processedAt));
+                    cell(row, event.adminMemo);
                     const actions = cell(row, '');
                     if (!event.processedAt) {
                         const button = document.createElement('button'); button.textContent = '처리 완료';
                         button.addEventListener('click', async () => {
+                            const adminMemo = window.prompt('처리 메모를 입력하세요 (최대 500자)');
+                            if (adminMemo === null) return;
                             button.disabled = true;
-                            try { await request(`/api/admin/events/${event.eventId}/process`, { method: 'PATCH' }); await load(); }
+                            try { await request(`/api/admin/events/${event.eventId}/process`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ adminMemo }) }); await load(); }
                             catch (error) { message.textContent = error.message; button.disabled = false; }
                         });
                         actions.append(button);

@@ -101,20 +101,37 @@ class WorkersafetyServerApplicationTests {
         mvc.perform(get("/api/admin/events").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
         mvc.perform(post("/api/worker/events").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(Map.of("time", "2026-01-01T09:00:00Z", "eventType", "FALL_DETECTED", "alertSender", "ACCELEROMETER"))))
-                .andExpect(status().isCreated()).andExpect(jsonPath("$.workerId").value(id)).andExpect(jsonPath("$.processedAt").isEmpty());
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.workerId").value(id))
+                .andExpect(jsonPath("$.processedAt").isEmpty()).andExpect(jsonPath("$.adminMemo").isEmpty());
         JsonNode list = json.readTree(mvc.perform(get("/api/admin/events").session(admin).param("workerId", Long.toString(id)).param("processed", "false").param("eventType", "FALL_DETECTED"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1)).andReturn().getResponse().getContentAsString());
         long eventId = list.get("items").get(0).get("eventId").asLong();
-        String first = mvc.perform(patch("/api/admin/events/{id}/process", eventId).session(admin).with(csrf())).andExpect(status().isOk())
-                .andExpect(jsonPath("$.processedBy").isNumber()).andReturn().getResponse().getContentAsString();
-        String second = mvc.perform(patch("/api/admin/events/{id}/process", eventId).session(admin).with(csrf())).andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
-        assertThat(json.readTree(first).get("processedAt")).isEqualTo(json.readTree(second).get("processedAt"));
+        mvc.perform(patch("/api/admin/events/{id}/process", eventId).session(admin).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"adminMemo\":\"   \"}"))
+                .andExpect(status().isBadRequest());
+        mvc.perform(patch("/api/admin/events/{id}/process", eventId).session(admin).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(json.writeValueAsString(Map.of("adminMemo", "메".repeat(501)))))
+                .andExpect(status().isBadRequest());
+        String memo = "현장 확인 완료. 작업자 이상 없음.";
+        long adminId = accounts.findByAdminLoginIdAndRole(ADMIN, Role.ADMIN).orElseThrow().getId();
+        String first = mvc.perform(patch("/api/admin/events/{id}/process", eventId).session(admin).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("adminMemo", memo))))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.processedBy").isNumber())
+                .andExpect(jsonPath("$.processedBy").value(adminId))
+                .andExpect(jsonPath("$.adminMemo").value(memo)).andReturn().getResponse().getContentAsString();
+        mvc.perform(patch("/api/admin/events/{id}/process", eventId).session(admin).with(csrf())
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"adminMemo\":\"다른 메모\"}"))
+                .andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EVENT_ALREADY_PROCESSED"));
+        assertThat(json.readTree(first).get("processedAt").isNull()).isFalse();
         mvc.perform(patch("/api/worker/me").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON).content("{\"workerName\":\"새 이름\"}"))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.workerName").value("새 이름"));
         mvc.perform(delete("/api/worker/me").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(Map.of("currentPassword", password)))).andExpect(status().isNoContent());
         mvc.perform(post("/api/worker/auth/logout").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
-        mvc.perform(get("/api/admin/events/{id}", eventId).session(admin)).andExpect(status().isOk()).andExpect(jsonPath("$.workerName").value("탈퇴한 작업자"));
+        mvc.perform(get("/api/admin/events/{id}", eventId).session(admin)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.workerName").value("탈퇴한 작업자"))
+                .andExpect(jsonPath("$.adminMemo").value(memo));
         mvc.perform(post("/api/admin/workers/{id}/reset-password", id).session(admin).with(csrf())).andExpect(status().isNotFound());
     }
 
@@ -155,18 +172,27 @@ class WorkersafetyServerApplicationTests {
         long eventId = json.readTree(body).get("eventId").asLong();
         var executor = Executors.newFixedThreadPool(2); var start = new CountDownLatch(1);
         try {
-            var first = executor.submit(() -> { start.await(); return mvc.perform(patch("/api/admin/events/{id}/process", eventId).session(admin).with(csrf())).andReturn().getResponse(); });
-            var second = executor.submit(() -> { start.await(); return mvc.perform(patch("/api/admin/events/{id}/process", eventId).session(admin).with(csrf())).andReturn().getResponse(); });
+            var first = executor.submit(() -> { start.await(); return mvc.perform(patch("/api/admin/events/{id}/process", eventId).session(admin).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content("{\"adminMemo\":\"처리자 A 메모\"}")).andReturn().getResponse(); });
+            var second = executor.submit(() -> { start.await(); return mvc.perform(patch("/api/admin/events/{id}/process", eventId).session(admin).with(csrf())
+                    .contentType(MediaType.APPLICATION_JSON).content("{\"adminMemo\":\"처리자 B 메모\"}")).andReturn().getResponse(); });
             start.countDown(); var one = first.get(15, TimeUnit.SECONDS); var two = second.get(15, TimeUnit.SECONDS);
-            assertThat(one.getStatus()).isIn(200, 503); assertThat(two.getStatus()).isIn(200, 503);
+            assertThat(one.getStatus()).isIn(200, 409, 503); assertThat(two.getStatus()).isIn(200, 409, 503);
             assertThat(one.getStatus() == 200 || two.getStatus() == 200).isTrue();
+            assertThat(one.getStatus() == 200 && two.getStatus() == 200).isFalse();
             JsonNode saved = json.readTree(mvc.perform(get("/api/admin/events/{id}", eventId).session(admin)).andExpect(status().isOk()).andReturn().getResponse().getContentAsString());
+            assertThat(saved.get("adminMemo").asString()).isIn("처리자 A 메모", "처리자 B 메모");
             for (var response : new org.springframework.mock.web.MockHttpServletResponse[]{one, two}) {
                 if (response.getStatus() == 200) {
                     JsonNode result = json.readTree(response.getContentAsString());
                     assertThat(result.get("processedAt")).isEqualTo(saved.get("processedAt"));
                     assertThat(result.get("processedBy")).isEqualTo(saved.get("processedBy"));
-                } else assertThat(json.readTree(response.getContentAsString()).get("code").asString()).isEqualTo("DATABASE_BUSY");
+                    assertThat(result.get("adminMemo")).isEqualTo(saved.get("adminMemo"));
+                } else {
+                    String code = json.readTree(response.getContentAsString()).get("code").asString();
+                    assertThat(code).isEqualTo(response.getStatus() == 409
+                            ? "EVENT_ALREADY_PROCESSED" : "DATABASE_BUSY");
+                }
             }
         } finally { executor.shutdownNow(); }
     }

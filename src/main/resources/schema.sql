@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS safety_events (
     alert_sender TEXT NOT NULL,
     processed_at INTEGER,
     processed_by INTEGER REFERENCES accounts(account_id) ON DELETE RESTRICT,
+    admin_memo TEXT,
     CHECK ((processed_at IS NULL AND processed_by IS NULL) OR (processed_at IS NOT NULL AND processed_by IS NOT NULL))
 );
 CREATE TABLE IF NOT EXISTS mobile_tokens (

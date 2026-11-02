@@ -51,7 +51,7 @@ $env:ADMIN_INITIAL_PASSWORD = [System.Net.NetworkCredential]::new('', $adminSecr
 | DELETE | `/api/worker/me` | JSON 본문의 `currentPassword` 확인 후 논리 탈퇴 |
 | GET | `/api/admin/events` | `processed`, `workerId`, `eventType`, `page`, `size`로 조회 |
 | GET | `/api/admin/events/{eventId}` | 이벤트 상세 |
-| PATCH | `/api/admin/events/{eventId}/process` | 이벤트 처리 완료 |
+| PATCH | `/api/admin/events/{eventId}/process` | JSON 본문 `adminMemo`(1~500자)와 처리 시각·관리자 저장; 이미 처리된 이벤트는 409 |
 | POST | `/api/admin/workers` | `workerName`, `sex`, `age`로 생성; 임시 비밀번호 1회 반환 |
 | GET | `/api/admin/workers` | 작업자 목록, `page`, `size` 지원 |
 | GET | `/api/admin/workers/{workerId}` | 작업자 상세 |
@@ -66,7 +66,7 @@ $env:ADMIN_INITIAL_PASSWORD = [System.Net.NetworkCredential]::new('', $adminSecr
 {"time":"2026-11-01T09:00:00Z","eventType":"FALL_DETECTED","alertSender":"ACCELEROMETER"}
 ```
 
-이벤트 유형은 `FALL_DETECTED`, `DANGER_ZONE_APPROACH`, `ABNORMAL_VITAL`입니다. 성별은 `M`, `F`, `U`, 나이는 0~150입니다. API 시각은 ISO 8601, 관리자 화면 시각은 Asia/Seoul 기준입니다. 요청이 실패하면 `{"code":"INVALID_REQUEST","message":"요청 내용을 확인하세요."}` 형식으로 응답합니다. 성공은 200·201·204, 입력 오류는 400, 인증 실패는 401, 권한·CSRF 실패는 403, 없는 항목은 404, SQLite 잠금 대기 초과는 503, 내부 오류는 500입니다.
+이벤트 유형은 `FALL_DETECTED`, `DANGER_ZONE_APPROACH`, `ABNORMAL_VITAL`입니다. 성별은 `M`, `F`, `U`, 나이는 0~150입니다. API 시각은 ISO 8601, 관리자 화면 시각은 Asia/Seoul 기준입니다. 처리 메모는 공백 제거 후 저장하며 1~500자여야 합니다. 한 번 처리한 이벤트의 처리자·시각·메모는 유지되고, 재처리 요청은 409 `EVENT_ALREADY_PROCESSED`를 반환합니다. 요청이 실패하면 `{"code":"INVALID_REQUEST","message":"요청 내용을 확인하세요."}` 형식으로 응답합니다. 성공은 200·201·204, 입력 오류는 400, 인증 실패는 401, 권한·CSRF 실패는 403, 없는 항목은 404, 상태 충돌은 409, SQLite 잠금 대기 초과는 503, 내부 오류는 500입니다.
 
 ## 테스트
 
@@ -80,7 +80,7 @@ $env:ADMIN_INITIAL_PASSWORD = [System.Net.NetworkCredential]::new('', $adminSecr
 
 `.env.example`을 `.env`로 복사하여 최초 관리자 정보를 설정하고 `docker compose up --build -d`를 실행합니다. 기존 관리자 계정이 있으면 재시작에 초기 자격증명이 필요하지 않습니다. `/data`는 `safety-data` 볼륨에 저장됩니다. 운영에서는 HTTPS를 종료하는 신뢰할 수 있는 리버스 프록시 뒤에서 실행하고 HTTPS 요청을 서버로 전달하도록 구성하세요. `prod` 프로필은 세션 쿠키에 Secure와 HttpOnly를 설정합니다.
 
-SQLite WAL은 단일 호스트의 로컬 파일시스템에서 사용하고 애플리케이션 인스턴스는 하나만 실행하세요. SQLite는 한 번에 한 writer만 지원합니다. DB 및 WAL 파일을 Git에 저장하지 마세요. 백업은 실행 중 DB 파일 하나만 복사하지 말고 SQLite의 온라인 백업 기능을 사용합니다. 예를 들어 SQLite CLI가 설치된 호스트에서 `sqlite3 <DB경로> ".backup '<백업경로>'"`를 실행한 뒤, 별도의 DB 파일로 복원하여 조회를 확인하세요. 스키마 변경은 백업 후 버전별 SQL로 수행하며 `schema.sql`의 `IF NOT EXISTS`는 기존 스키마를 변경하지 않습니다.
+SQLite WAL은 단일 호스트의 로컬 파일시스템에서 사용하고 애플리케이션 인스턴스는 하나만 실행하세요. SQLite는 한 번에 한 writer만 지원합니다. DB 및 WAL 파일을 Git에 저장하지 마세요. 백업은 실행 중 DB 파일 하나만 복사하지 말고 SQLite의 온라인 백업 기능을 사용합니다. 예를 들어 SQLite CLI가 설치된 호스트에서 `sqlite3 <DB경로> ".backup '<백업경로>'"`를 실행한 뒤, 별도의 DB 파일로 복원하여 조회를 확인하세요. 서버 시작 시 기존 `safety_events` 테이블에 `admin_memo` 열이 없으면 추가합니다. 다른 스키마 변경은 백업 후 버전별 SQL로 수행하며 `schema.sql`의 `IF NOT EXISTS`는 기존 스키마를 변경하지 않습니다.
 
 ## 탈퇴와 보존
 

@@ -36,7 +36,29 @@ public class DatabaseConfig {
             dataSource.close();
             throw e;
         }
+        try {
+            ensureAdminMemoColumn(dataSource);
+        } catch (Exception e) {
+            dataSource.close();
+            throw e;
+        }
         return dataSource;
+    }
+
+    private void ensureAdminMemoColumn(DataSource dataSource) throws Exception {
+        try (var connection = dataSource.getConnection(); var statement = connection.createStatement()) {
+            boolean tableExists = false;
+            boolean columnExists = false;
+            try (var columns = statement.executeQuery("PRAGMA table_info(safety_events)")) {
+                while (columns.next()) {
+                    tableExists = true;
+                    if ("admin_memo".equals(columns.getString("name"))) columnExists = true;
+                }
+            }
+            if (tableExists && !columnExists) {
+                statement.execute("ALTER TABLE safety_events ADD COLUMN admin_memo TEXT");
+            }
+        }
     }
 
     @Bean

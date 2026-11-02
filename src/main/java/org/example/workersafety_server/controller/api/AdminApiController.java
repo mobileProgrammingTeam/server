@@ -27,7 +27,10 @@ public class AdminApiController {
     @GetMapping("/events/{eventId}")
     public EventInfo event(@PathVariable long eventId) { return service.event(eventId); }
     @PatchMapping("/events/{eventId}/process")
-    public EventInfo process(@PathVariable long eventId, Authentication admin) { return service.processEvent(eventId, admin.getName()); }
+    public EventInfo process(@PathVariable long eventId, @Valid @RequestBody ProcessEventRequest request,
+                             Authentication admin) {
+        return service.processEvent(eventId, admin.getName(), request.adminMemo());
+    }
     @PostMapping("/workers")
     public ResponseEntity<WorkerCreated> create(@Valid @RequestBody NewWorker request) {
         WorkerCreated created = service.createWorker(request);

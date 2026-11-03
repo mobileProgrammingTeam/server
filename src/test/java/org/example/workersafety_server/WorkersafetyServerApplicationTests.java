@@ -81,11 +81,18 @@ class WorkersafetyServerApplicationTests {
         mvc.perform(get("/api/admin/events")).andExpect(status().isUnauthorized()).andExpect(jsonPath("$.code").value("AUTHENTICATION_FAILED"));
         mvc.perform(get("/api/worker/events")).andExpect(status().isUnauthorized());
         mvc.perform(get("/admin/dashboard")).andExpect(status().is3xxRedirection());
+        mvc.perform(get("/admin/register")).andExpect(status().is3xxRedirection());
         mvc.perform(get("/admin/login")).andExpect(status().isOk());
         MockHttpSession session = adminSession();
         mvc.perform(get("/admin/dashboard").session(session)).andExpect(status().isOk());
         mvc.perform(get("/admin/events").session(session)).andExpect(status().isOk());
         mvc.perform(get("/admin/workers").session(session)).andExpect(status().isOk());
+        int workersBefore = jdbc.queryForObject("SELECT COUNT(*) FROM worker_profiles", Integer.class);
+        mvc.perform(post("/api/admin/workers").with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workerName\":\"Anonymous\",\"sex\":\"U\",\"age\":25}"))
+                .andExpect(status().isUnauthorized());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM worker_profiles", Integer.class)).isEqualTo(workersBefore);
+        mvc.perform(get("/admin/register").session(session)).andExpect(status().is3xxRedirection()).andExpect(redirectedUrl("/admin/workers"));
         mvc.perform(post("/api/admin/workers").session(session).contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
         long adminId = accounts.findByAdminLoginIdAndRole(ADMIN, Role.ADMIN).orElseThrow().getId();
@@ -272,6 +279,41 @@ class WorkersafetyServerApplicationTests {
         mvc.perform(patch("/api/worker/me/password").header("Authorization", "Bearer " + token).contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(Map.of("currentPassword", UUID.randomUUID().toString(), "newPassword", "new-" + UUID.randomUUID()))))
                 .andExpect(status().isUnauthorized());
+    }
+
+    @Test void adminDesignPagesRenderAndDesignApisReturnFixedValuesWithoutWriting() throws Exception {
+        MockHttpSession admin = adminSession();
+        int workersBefore = jdbc.queryForObject("SELECT COUNT(*) FROM worker_profiles", Integer.class);
+        int eventsBefore = jdbc.queryForObject("SELECT COUNT(*) FROM safety_events", Integer.class);
+
+        mvc.perform(get("/api/admin/dashboard").session(admin)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.workers.length()").value(4));
+        mvc.perform(get("/api/admin/workers/status").session(admin)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].workerId").value(101));
+        for (String path : new String[]{"/admin/dashboard", "/admin/events", "/admin/workers",
+                "/admin/alerts", "/admin/zones", "/admin/connectivity", "/admin/weather",
+                "/admin/reports", "/admin/settings", "/admin/admins"}) {
+            mvc.perform(get(path).session(admin)).andExpect(status().isOk());
+        }
+        String workerPage = mvc.perform(get("/admin/workers").session(admin)).andReturn().getResponse().getContentAsString();
+        assertThat(workerPage).contains("+ 작업자 생성", "id=\"worker-create\"", "name=\"age\"", "등록된 작업자가 없습니다.");
+        assertThat(workerPage).doesNotContain("김민준", "A 작업구역", "sample@example.invalid");
+        String workerList = mvc.perform(get("/admin/workers").param("fragment", "list").session(admin))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertThat(workerList).contains("id=\"worker-list\"").doesNotContain("id=\"worker-form\"");
+        for (String path : new String[]{"/admin/dashboard", "/admin/alerts", "/admin/zones", "/admin/connectivity",
+                "/admin/weather", "/admin/reports", "/admin/settings", "/admin/admins"}) {
+            String html = mvc.perform(get(path).session(admin)).andReturn().getResponse().getContentAsString();
+            assertThat(html).doesNotContain("김민준", "A 작업구역", "example.invalid", "33°C", "최도윤");
+        }
+        mvc.perform(post("/api/admin/weather/notices").session(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"message\":\"sample\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.notice.id").value(4002));
+        mvc.perform(post("/api/worker/auth/register").contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workerName\":\"Sample\",\"email\":\"sample@example.invalid\",\"password\":\"password-123\"}"))
+                .andExpect(status().isUnauthorized());
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM worker_profiles", Integer.class)).isEqualTo(workersBefore);
+        assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM safety_events", Integer.class)).isEqualTo(eventsBefore);
     }
 
     private MockHttpSession adminSession() throws Exception {

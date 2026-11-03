@@ -1,6 +1,39 @@
 <!doctype html>
 <html lang="ko" xmlns:th="http://www.thymeleaf.org">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="csrf-token" th:content="${_csrf.token}"><meta name="csrf-header" th:content="${_csrf.headerName}"><title>작업자 관리</title><link rel="stylesheet" th:href="@{/css/admin.css}"><script defer th:src="@{/js/admin.js}"></script></head>
-<body><header><a class="brand" th:href="@{/admin/dashboard}">안전 관리</a><nav><a th:href="@{/admin/dashboard}">대시보드</a><a th:href="@{/admin/events}">이벤트</a><a th:href="@{/admin/workers}">작업자</a></nav><form th:action="@{/admin/logout}" method="post"><button class="secondary">로그아웃</button></form></header>
-<main id="workers-page"><h1>작업자 관리</h1><section><h2>작업자 생성</h2><form id="worker-form" class="toolbar"><label>이름 <input name="workerName" maxlength="50" required></label><label>성별 <select name="sex" required><option value="M">M</option><option value="F">F</option><option value="U">미지정</option></select></label><label>나이 <input name="age" type="number" min="0" max="150" required></label><button>생성</button></form><p id="credentials" class="notice" role="status"></p></section>
-<p id="message" role="status"></p><div class="table-wrap"><table><thead><tr><th>ID</th><th>이름</th><th>성별</th><th>나이</th><th>상태</th><th>관리</th></tr></thead><tbody id="workers-body"></tbody></table></div><div class="pagination"><button id="previous" class="secondary">이전</button><span id="page-info"></span><button id="next" class="secondary">다음</button></div></main></body></html>
+<head th:replace="~{admin/fragments :: head('작업자 관리')}"></head>
+<body>
+<div class="app-shell">
+  <aside th:replace="~{admin/fragments :: sidebar('workers')}"></aside>
+  <div class="workspace">
+    <header th:replace="~{admin/fragments :: topbar}"></header>
+    <p id="notice" role="status" aria-live="polite"></p>
+    <main id="workers-page">
+      <div class="page-heading"><div><p class="eyebrow">WORKER MANAGEMENT</p><h1>작업자</h1><p class="muted">작업자 계정과 등록 정보를 관리합니다.</p></div></div>
+      <section class="surface panel" id="worker-create">
+        <div class="surface-head"><div><h2>작업자 계정 생성</h2><p>생성 후 임시 비밀번호를 작업자에게 안전하게 전달하세요.</p></div></div>
+        <form id="worker-form" class="worker-create-form">
+          <label>이름<input name="workerName" maxlength="50" autocomplete="name" required></label>
+          <label>성별<select name="sex" required><option value="" selected disabled>선택하세요</option><option value="M">남성</option><option value="F">여성</option><option value="U">미상</option></select></label>
+          <label>나이<input name="age" type="number" min="0" max="150" inputmode="numeric" required></label>
+          <button type="submit" class="primary-action">작업자 생성</button>
+        </form>
+        <p id="credentials" class="notice worker-created" role="status" aria-live="polite" hidden><span id="created-summary"></span><a id="created-worker-link" class="button-link">상세 보기</a></p>
+        <p id="create-error" class="error" role="alert" hidden></p>
+      </section>
+      <section id="worker-list" class="surface panel" th:fragment="workerList" th:attr="data-page=${page}">
+        <div class="surface-head"><div><h2>등록 작업자</h2><p th:text="|전체 ${workersPage.totalElements}명|">전체 0명</p></div></div>
+        <div class="table-wrap"><table><thead><tr><th>ID</th><th>이름</th><th>성별</th><th>나이</th><th>계정</th><th>안전 상태</th><th>구역</th><th>심박동</th><th>산소포화도</th><th>마지막 통신</th><th>관리</th></tr></thead>
+          <tbody><tr th:each="worker : ${workersPage.items}" th:attr="data-worker-id=${worker.workerId}">
+            <td th:text="${worker.workerId}">-</td><td><a th:href="@{/admin/workers/{id}(id=${worker.workerId})}" th:text="${worker.workerName}">작업자</a></td>
+            <td th:text="${worker.sex == null ? '-' : worker.sex}">-</td><td th:text="${worker.age == null ? '-' : worker.age}">-</td>
+            <td th:text="${worker.enabled ? '활성' : '탈퇴'}">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+            <td><button type="button" class="reset-password" th:if="${worker.enabled}" th:attr="data-worker-id=${worker.workerId}">비밀번호 초기화</button></td>
+          </tr><tr th:if="${workersPage.items.empty}"><td class="empty" colspan="11">등록된 작업자가 없습니다. 위에서 작업자 계정을 생성하세요.</td></tr></tbody>
+        </table></div>
+        <div class="pagination"><a class="button-link" th:if="${page > 0}" th:href="@{/admin/workers(page=${page - 1})}">이전</a><span th:text="|${page + 1} / ${T(java.lang.Math).max(workersPage.totalPages, 1)} 페이지|">1 페이지</span><a class="button-link" th:if="${page + 1 < workersPage.totalPages}" th:href="@{/admin/workers(page=${page + 1})}">다음</a></div>
+      </section>
+    </main>
+        </div>
+</div>
+</body>
+</html>

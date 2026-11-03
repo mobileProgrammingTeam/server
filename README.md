@@ -39,6 +39,12 @@ $env:ADMIN_INITIAL_PASSWORD = [System.Net.NetworkCredential]::new('', $adminSecr
 
 ## API
 
+### 관리자 화면 이전 API
+
+관리자 화면은 `/admin/**` Thymeleaf 페이지로 제공한다. 작업자 계정 생성은 관리자 로그인 후 `/admin/workers`에서 수행하며 기존 `POST /api/admin/workers` 관리자 API를 사용한다. 상태·구역·통신·날씨·감사·설정·관리자 역할 등 아직 도메인 로직이 없는 데이터와 명령은 정식 `/api/admin/**` 경로에서 고정 DTO를 반환한다. 이 고정 응답은 저장·전송되지 않으며 해당 컨트롤러의 `TODO` 주석에 실제 연동 범위를 적었다. 작업자 공개 가입 API는 제공하지 않는다. 이후 실제 기능을 구현할 때 화면 URL과 DTO 계약을 바꾸지 않고 해당 반환부를 서비스 호출로 교체한다.
+
+화면 경로: `/admin/dashboard`, `/admin/events`, `/admin/workers`, `/admin/alerts`, `/admin/zones`, `/admin/connectivity`, `/admin/weather`, `/admin/reports`, `/admin/settings`, `/admin/admins`. 작업자와 구역 상세는 각 목록에서 ID 경로로 연다.
+
 모바일 API는 로그인 후 `Authorization: Bearer <accessToken>`을 전송합니다. 관리자 API는 관리자 폼 로그인 세션을 사용하며 POST·PATCH 요청에 CSRF 토큰을 포함해야 합니다. 관리자 화면은 필요한 CSRF 토큰을 자동 전송합니다. 비밀번호 변경·초기화·탈퇴 후 모든 기존 모바일 토큰은 무효화됩니다.
 
 | 메서드 | 경로 | 설명 |

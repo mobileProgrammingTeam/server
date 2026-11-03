@@ -1,10 +1,5 @@
 .git
 .idea
 target
-data
-.docker-migration
 .env
-*.db
-*.db-wal
-*.db-shm
 *.iml

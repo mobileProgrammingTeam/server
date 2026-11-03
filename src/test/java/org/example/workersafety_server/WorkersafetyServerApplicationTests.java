@@ -21,10 +21,12 @@ import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.junit.jupiter.Container;
+import org.testcontainers.junit.jupiter.Testcontainers;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import javax.sql.DataSource;
-import java.nio.file.Path;
 import java.time.Instant;
 import java.time.Clock;
 import java.time.Duration;
@@ -42,10 +44,15 @@ import static org.mockito.Mockito.*;
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
+@Testcontainers
 class WorkersafetyServerApplicationTests {
     private static final String ADMIN = "admin-" + UUID.randomUUID();
     private static final String PASSWORD = "test-" + UUID.randomUUID();
-    private static final String DB_PATH = Path.of(System.getProperty("java.io.tmpdir"), "workersafety-test-" + UUID.randomUUID() + ".db").toString();
+    @Container
+    private static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:17-alpine")
+            .withDatabaseName("workersafety_test")
+            .withUsername("workersafety_test")
+            .withPassword("workersafety_test");
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
     @Autowired DataSource dataSource;
@@ -56,7 +63,9 @@ class WorkersafetyServerApplicationTests {
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
-        registry.add("app.db-path", () -> DB_PATH);
+        registry.add("spring.datasource.url", POSTGRES::getJdbcUrl);
+        registry.add("spring.datasource.username", POSTGRES::getUsername);
+        registry.add("spring.datasource.password", POSTGRES::getPassword);
         registry.add("ADMIN_LOGIN_ID", () -> ADMIN);
         registry.add("ADMIN_INITIAL_PASSWORD", () -> PASSWORD);
     }
@@ -65,13 +74,9 @@ class WorkersafetyServerApplicationTests {
         mvc.perform(get("/health")).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("UP"));
         assertThat(accounts.existsByRole(Role.ADMIN)).isTrue();
         try (var first = dataSource.getConnection(); var second = dataSource.getConnection()) {
+            assertThat(first.getMetaData().getDatabaseProductName()).isEqualTo("PostgreSQL");
             for (var connection : new java.sql.Connection[]{first, second}) {
-                try (var statement = connection.createStatement(); var result = statement.executeQuery("PRAGMA foreign_keys")) {
-                    assertThat(result.next()).isTrue(); assertThat(result.getInt(1)).isEqualTo(1);
-                }
-                try (var statement = connection.createStatement(); var result = statement.executeQuery("PRAGMA busy_timeout")) {
-                    assertThat(result.next()).isTrue(); assertThat(result.getInt(1)).isEqualTo(5000);
-                }
+                assertThat(connection.isValid(2)).isTrue();
             }
         }
         assertThatThrownBy(() -> jdbc.update("INSERT INTO worker_profiles(worker_id,worker_name,sex,age) VALUES (?,?,?,?)", -1, "invalid", "U", 1)).isInstanceOf(Exception.class);
@@ -221,7 +226,7 @@ class WorkersafetyServerApplicationTests {
     @Test void bearerFilterReturnsJsonWhenDatabaseIsLocked() throws Exception {
         var failingService = mock(SafetyService.class);
         when(failingService.authenticate(anyString())).thenThrow(new org.springframework.dao.DataAccessResourceFailureException(
-                "unavailable", new java.sql.SQLException("locked", null, 5)));
+                "unavailable", new java.sql.SQLException("lock not available", "55P03")));
         var request = new org.springframework.mock.web.MockHttpServletRequest("GET", "/api/worker/events");
         request.addHeader("Authorization", "Bearer " + UUID.randomUUID());
         var response = new org.springframework.mock.web.MockHttpServletResponse();

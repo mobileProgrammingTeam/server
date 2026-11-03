@@ -2,7 +2,7 @@
 
 작업자 안전 이벤트를 저장·조회·처리하는 서버입니다. Android 앱용 REST API와 관리자 웹을 제공합니다.
 
-- Java 17 · Maven · Spring Boot · Spring Security · Thymeleaf · JPA · SQLite
+- Java 17 · Maven · Spring Boot · Spring Security · Thymeleaf · JPA · PostgreSQL
 - 작업자 계정 생성, 로그인, 프로필 관리, 안전 이벤트 등록 및 처리 지원
 - 미구현 도메인 API는 고정 응답을 반환하며, 관리자 화면은 실제 데이터 또는 빈 상태를 표시
 
@@ -29,8 +29,9 @@ macOS/Linux에서는 `./mvnw spring-boot:run`을 사용합니다. IntelliJ에서
 | --- | --- | --- |
 | `ADMIN_LOGIN_ID` | 최초 관리자 ID | 관리자 계정이 없을 때 필수 |
 | `ADMIN_INITIAL_PASSWORD` | 최초 관리자 비밀번호 | 관리자 계정이 없을 때 필수 |
-| `SQLITE_DB_PATH` | DB 경로 | 로컬 `./data/workersafety.db`, Docker `/data/workersafety.db` |
-| `SERVER_PORT` | 서버 포트 | `8080` |
+| `SPRING_DATASOURCE_URL` | Shared PostgreSQL connection | IntelliJ `localhost:5432`, Docker `database:5432` |
+| `SERVER_PORT` | IntelliJ application port | `8080` |
+| `DOCKER_SERVER_PORT` | Docker application port on the host | `8081` |
 | `MOBILE_TOKEN_TTL` | 작업자 토큰 유효 기간 | `PT12H` |
 | `SPRING_PROFILES_ACTIVE` | 실행 프로필 | 로컬 `local`, Compose 미지정 시 `prod` |
 
@@ -44,7 +45,7 @@ macOS/Linux에서는 `./mvnw spring-boot:run`을 사용합니다. IntelliJ에서
 
 - [작업자 API](src/main/java/org/example/workersafety_server/controller/api/WorkerController.java): 인증, 이벤트 등록, 프로필·비밀번호 변경, 탈퇴
 - [관리자 API](src/main/java/org/example/workersafety_server/controller/api/AdminApiController.java): 작업자 생성·조회·비밀번호 초기화, 이벤트 조회·처리
-- [DB 스키마](src/main/resources/schema.sql)
+- [DB schema](src/main/resources/schema-postgresql.sql)
 
 ## 테스트
 
@@ -52,7 +53,7 @@ macOS/Linux에서는 `./mvnw spring-boot:run`을 사용합니다. IntelliJ에서
 .\mvnw.cmd clean verify
 ```
 
-테스트는 임시 SQLite DB를 사용합니다. 실행 중인 개발·테스트 서버의 API는 다음 도구로 확인할 수 있습니다.
+테스트는 임시 PostgreSQL database를 사용합니다. 실행 중인 개발·테스트 서버의 API는 다음 도구로 확인할 수 있습니다.
 
 ```powershell
 python -m pip install httpx
@@ -63,12 +64,14 @@ API 테스터는 서버 주소와 관리자 정보를 입력받습니다. 테스
 
 ## Docker
 
-`.env`에 관리자 정보를 설정한 뒤 실행합니다. 예제의 `local` 프로필은 HTTP 개발용이며, 운영 시 `prod`로 바꾸고 HTTPS 리버스 프록시 뒤에서 실행합니다.
+Docker and the IntelliJ local profile both connect to the same PostgreSQL database. Start the database before running the application from IntelliJ:
 
 ```powershell
-docker compose up --build -d
+docker compose up -d database
 ```
 
-DB는 `safety-data` 볼륨에 보관됩니다. 기존 로컬 DB는 자동 이전되지 않습니다. `docker compose down -v`는 DB 볼륨도 삭제하므로 데이터 보관 시 사용하지 마세요.
+Run the Docker application at `http://localhost:8081` with `docker compose up --build -d`. The IntelliJ application uses `http://localhost:8080`. Both show the same data.
 
-SQLite는 단일 인스턴스로 운영하고, 백업은 SQLite 온라인 백업 기능을 사용합니다. 작업자 탈퇴는 논리 삭제이며 안전 이벤트 이력은 유지됩니다.
+PostgreSQL data is stored in the `postgres-data` Docker volume. `docker compose down -v` deletes it.
+
+See [shared database setup](docs/shared-database.md) for run instructions.

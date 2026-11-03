@@ -32,9 +32,4 @@ build/
 ### VS Code ###
 .vscode/
 
-/data/
-/.docker-migration/
 .env
-*.db
-*.db-wal
-*.db-shm

@@ -33,6 +33,7 @@ build/
 .vscode/
 
 /data/
+/.docker-migration/
 .env
 *.db
 *.db-wal

@@ -16,7 +16,8 @@ public final class ApiModels {
     public record NewWorker(@NotBlank @Size(max = 50) String workerName,
                             @NotNull @Pattern(regexp = "M|F|U") String sex,
                             @NotNull @Min(0) @Max(150) Integer age) { }
-    public record WorkerInfo(Long workerId, String workerName, String sex, Integer age, boolean enabled) { }
+    public record WorkerInfo(Long workerId, String workerName, String sex, Integer age, boolean enabled,
+                              boolean loginLocked, boolean deleted) { }
     public record WorkerCreated(Long workerId, String temporaryPassword) {
         @Override public String toString() { return "WorkerCreated[workerId=" + workerId + ", temporaryPassword=[PROTECTED]]"; }
     }

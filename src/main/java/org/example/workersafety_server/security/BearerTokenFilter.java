@@ -28,7 +28,7 @@ public class BearerTokenFilter extends OncePerRequestFilter {
             try { workerId = service.authenticate(token); }
             catch (DataAccessException e) {
                 boolean busy = DatabaseErrors.isBusy(e);
-                if (!busy) log.error("Token authentication database failure", e);
+                if (!busy) log.error("Token authentication database failure");
                 response.setStatus(busy ? 503 : 500);
                 response.setContentType("application/json"); response.setCharacterEncoding("UTF-8");
                 response.getWriter().write(busy
@@ -38,6 +38,8 @@ public class BearerTokenFilter extends OncePerRequestFilter {
             }
             if (workerId != null) {
                 var auth = UsernamePasswordAuthenticationToken.authenticated(workerId, token, List.of(new SimpleGrantedAuthority("ROLE_WORKER")));
+                request.setAttribute("actorRole", "WORKER");
+                request.setAttribute("actorId", workerId);
                 SecurityContextHolder.getContext().setAuthentication(auth);
             }
         }

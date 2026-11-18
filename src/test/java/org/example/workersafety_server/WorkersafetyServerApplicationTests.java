@@ -5,6 +5,9 @@ import org.example.workersafety_server.repository.AccountRepository;
 import org.example.workersafety_server.service.SafetyService;
 import org.example.workersafety_server.controller.api.HealthController;
 import org.example.workersafety_server.security.BearerTokenFilter;
+import org.example.workersafety_server.security.LoginAttemptFilter;
+import org.example.workersafety_server.security.RequestLogFilter;
+import org.example.workersafety_server.security.AdminAuthenticationLog;
 import org.example.workersafety_server.dto.ApiModels.Login;
 import org.example.workersafety_server.exception.ApiException;
 import org.example.workersafety_server.repository.WorkerProfileRepository;
@@ -16,7 +19,10 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.core.io.ClassPathResource;
+import org.springframework.jdbc.datasource.init.ScriptUtils;
 import org.springframework.mock.web.MockHttpSession;
+import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.ActiveProfiles;
@@ -30,8 +36,10 @@ import javax.sql.DataSource;
 import java.time.Instant;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.ZoneOffset;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -40,6 +48,11 @@ import static org.springframework.security.test.web.servlet.request.SecurityMock
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 import static org.mockito.Mockito.*;
+import ch.qos.logback.classic.Logger;
+import ch.qos.logback.classic.spi.ILoggingEvent;
+import ch.qos.logback.core.read.ListAppender;
+import org.slf4j.LoggerFactory;
+import org.springframework.transaction.PlatformTransactionManager;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -60,6 +73,8 @@ class WorkersafetyServerApplicationTests {
     @Autowired AccountRepository accounts;
     @Autowired SafetyService service;
     @Autowired org.springframework.security.crypto.password.PasswordEncoder encoder;
+    @Autowired PlatformTransactionManager transactionManager;
+    @Autowired org.springframework.context.ApplicationContext context;
 
     @DynamicPropertySource
     static void properties(DynamicPropertyRegistry registry) {
@@ -97,7 +112,7 @@ class WorkersafetyServerApplicationTests {
                         .content("{\"workerName\":\"Anonymous\",\"sex\":\"U\",\"age\":25}"))
                 .andExpect(status().isUnauthorized());
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM worker_profiles", Integer.class)).isEqualTo(workersBefore);
-        mvc.perform(get("/admin/register").session(session)).andExpect(status().is3xxRedirection()).andExpect(redirectedUrl("/admin/workers"));
+        mvc.perform(get("/admin/register").session(session)).andExpect(status().is3xxRedirection()).andExpect(redirectedUrl("/admin/workers#worker-create"));
         mvc.perform(post("/api/admin/workers").session(session).contentType(MediaType.APPLICATION_JSON).content("{}"))
                 .andExpect(status().isForbidden()).andExpect(jsonPath("$.code").value("ACCESS_DENIED"));
         long adminId = accounts.findByAdminLoginIdAndRole(ADMIN, Role.ADMIN).orElseThrow().getId();
@@ -267,6 +282,147 @@ class WorkersafetyServerApplicationTests {
         } finally { executor.shutdownNow(); }
     }
 
+    @Test void lockedAccountRevokesTokensAndAdminResetUnlocksIt() throws Exception {
+        JsonNode created = createWorker(adminSession());
+        long id = created.get("workerId").asLong();
+        String password = created.get("temporaryPassword").asString();
+        String token = login(id, password);
+        for (int attempt = 0; attempt < 5; attempt++) {
+            assertThatThrownBy(() -> service.login(new Login(id, "incorrect-password"))).isInstanceOf(ApiException.class);
+        }
+        String afterFive = service.login(new Login(id, password)).accessToken();
+        for (int attempt = 0; attempt < 6; attempt++) {
+            assertThatThrownBy(() -> service.login(new Login(id, "incorrect-password"))).isInstanceOf(ApiException.class);
+        }
+        assertThat(service.authenticate(token)).isNull();
+        assertThat(service.authenticate(afterFive)).isNull();
+        assertThatThrownBy(() -> service.login(new Login(id, password))).isInstanceOf(ApiException.class);
+        mvc.perform(post("/api/admin/workers/{id}/reset-password", id).session(adminSession()).with(csrf()))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.temporaryPassword").value("0000"));
+        assertThat(service.login(new Login(id, "0000"))).isNotNull();
+    }
+
+    @Test void appAndAdminLoginShareIpLimitAndReturnRetryAfter() throws Exception {
+        String ip = "192.0.2." + (1 + java.util.concurrent.ThreadLocalRandom.current().nextInt(200));
+        mvc.perform(post("/admin/login").with(remoteIp(ip)).param("adminId", ADMIN).param("password", PASSWORD))
+                .andExpect(status().isForbidden());
+        mvc.perform(get("/admin/login").with(remoteIp(ip))).andExpect(status().isOk());
+        for (int attempt = 0; attempt < 7; attempt++) {
+            mvc.perform(post("/api/worker/auth/login").with(remoteIp(ip)).contentType(MediaType.APPLICATION_JSON)
+                            .content("{\"workerId\":999999,\"password\":\"wrong-password\"}"))
+                    .andExpect(status().isUnauthorized());
+        }
+        for (int attempt = 0; attempt < 3; attempt++) {
+            mvc.perform(post("/admin/login").with(remoteIp(ip)).with(csrf())
+                            .param("adminId", ADMIN).param("password", PASSWORD))
+                    .andExpect(status().is3xxRedirection());
+        }
+        mvc.perform(post("/api/worker/auth/login").with(remoteIp(ip)).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"workerId\":999999,\"password\":\"wrong-password\"}"))
+                .andExpect(status().isTooManyRequests()).andExpect(header().string("Retry-After", "300"))
+                .andExpect(jsonPath("$.code").value("LOGIN_RATE_LIMITED"));
+    }
+
+    @Test void legacyIpAttemptTableMigratesWithoutLosingRowsAndCanRunTwice() throws Exception {
+        jdbc.execute("DROP TABLE login_ip_attempts");
+        jdbc.execute("CREATE TABLE login_ip_attempts (ip_address TEXT NOT NULL, attempted_at BIGINT NOT NULL, PRIMARY KEY (ip_address, attempted_at))");
+        jdbc.update("INSERT INTO login_ip_attempts(ip_address, attempted_at) VALUES (?, ?)", "2001:db8::1", Instant.now().toEpochMilli());
+        try (var connection = dataSource.getConnection()) {
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("schema-postgresql.sql"));
+            ScriptUtils.executeSqlScript(connection, new ClassPathResource("schema-postgresql.sql"));
+        }
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM login_ip_attempts WHERE ip_address = ?", Integer.class, "2001:db8::1")).isEqualTo(1);
+        assertThat(jdbc.queryForObject("SELECT attempt_id FROM login_ip_attempts WHERE ip_address = ?", Long.class, "2001:db8::1")).isNotNull();
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM pg_constraint WHERE conrelid = 'login_ip_attempts'::regclass AND contype = 'p'", Integer.class)).isEqualTo(1);
+    }
+
+    @Test void rateLimitHonorsWindowExpiryBlockExpiryAndConcurrentRequests() throws Exception {
+        long base = 1_800_000_000_000L;
+        String boundaryIp = "198.51.100.41";
+        for (int attempt = 0; attempt < 10; attempt++) assertThat(rateAttempt(boundaryIp, base + attempt * 1000L).getStatus()).isEqualTo(200);
+        assertThat(rateAttempt(boundaryIp, base + 180_000).getStatus()).isEqualTo(200);
+
+        String blockedIp = "198.51.100.42";
+        for (int attempt = 0; attempt < 11; attempt++) rateAttempt(blockedIp, base + attempt * 1000L);
+        for (int second = 200; second <= 300; second += 10) {
+            assertThat(rateAttempt(blockedIp, base + second * 1000L).getStatus()).isEqualTo(429);
+        }
+        assertThat(rateAttempt(blockedIp, base + 310_000).getStatus()).isEqualTo(200);
+
+        String concurrentIp = "203.0.113.54";
+        var executor = Executors.newFixedThreadPool(12);
+        var start = new CountDownLatch(1);
+        try {
+            var attempts = new java.util.ArrayList<java.util.concurrent.Future<Integer>>();
+            for (int i = 0; i < 12; i++) attempts.add(executor.submit(() -> {
+                start.await();
+                return rateAttempt(concurrentIp, base + 500_000).getStatus();
+            }));
+            start.countDown();
+            int passed = 0;
+            int limited = 0;
+            for (var attempt : attempts) {
+                int result = attempt.get(15, TimeUnit.SECONDS);
+                if (result == 200) passed++;
+                if (result == 429) limited++;
+            }
+            assertThat(passed).isEqualTo(10);
+            assertThat(limited).isEqualTo(2);
+        } finally { executor.shutdownNow(); }
+    }
+
+    @Test void requestAndServiceLogsAreJsonAndShareRequestId() throws Exception {
+        assertThat(context.getBeansOfType(RequestLogFilter.class)).hasSize(1);
+        var requests = new ListAppender<ILoggingEvent>(); requests.start();
+        var services = new ListAppender<ILoggingEvent>(); services.start();
+        Logger requestLogger = (Logger) LoggerFactory.getLogger(RequestLogFilter.class);
+        Logger serviceLogger = (Logger) LoggerFactory.getLogger(org.example.workersafety_server.service.ServiceCallLogger.class);
+        requestLogger.addAppender(requests); serviceLogger.addAppender(services);
+        try {
+            mvc.perform(get("/api/admin/events").session(adminSession())).andExpect(status().isOk());
+            JsonNode http = json.readTree(requests.list.get(requests.list.size() - 1).getFormattedMessage());
+            JsonNode service = services.list.stream().map(ILoggingEvent::getFormattedMessage).map(line -> {
+                try { return json.readTree(line); } catch (Exception ex) { throw new IllegalStateException(ex); }
+            }).filter(node -> "SafetyService.events".equals(node.path("serviceMethod").asText())).findFirst().orElseThrow();
+            assertThat(http.get("requestId").asString()).isNotBlank();
+            assertThat(http.get("actorRole").asString()).isEqualTo("ADMIN");
+            assertThat(service.get("requestId").asString()).isEqualTo(http.get("requestId").asString());
+            assertThat(service.get("outcome").asString()).isEqualTo("SUCCESS");
+        } finally {
+            requestLogger.detachAppender(requests); serviceLogger.detachAppender(services);
+            requests.stop(); services.stop();
+        }
+    }
+
+    @Test void adminLoginAuditCapturesFailureSeparatelyFromHttpRedirect() throws Exception {
+        var authentication = new ListAppender<ILoggingEvent>(); authentication.start();
+        Logger logger = (Logger) LoggerFactory.getLogger(AdminAuthenticationLog.class);
+        logger.addAppender(authentication);
+        try {
+            mvc.perform(post("/admin/login").with(remoteIp("192.0.2.199")).with(csrf())
+                            .param("adminId", ADMIN).param("password", "wrong-password"))
+                    .andExpect(status().is3xxRedirection()).andExpect(redirectedUrl("/admin/login?error"));
+            JsonNode audit = json.readTree(authentication.list.get(authentication.list.size() - 1).getFormattedMessage());
+            assertThat(audit.get("outcome").asString()).isEqualTo("FAILURE");
+            assertThat(audit.get("attemptedId").asString()).isEqualTo(ADMIN);
+        } finally { logger.detachAppender(authentication); authentication.stop(); }
+    }
+
+    private MockHttpServletResponse rateAttempt(String ip, long millis) throws Exception {
+        var filter = new LoginAttemptFilter(jdbc, transactionManager,
+                Clock.fixed(Instant.ofEpochMilli(millis), ZoneOffset.UTC));
+        var request = new org.springframework.mock.web.MockHttpServletRequest("POST", "/api/worker/auth/login");
+        request.setServletPath("/api/worker/auth/login");
+        request.setRemoteAddr(ip);
+        var response = new MockHttpServletResponse();
+        filter.doFilter(request, response, new org.springframework.mock.web.MockFilterChain());
+        return response;
+    }
+
+    private org.springframework.test.web.servlet.request.RequestPostProcessor remoteIp(String ip) {
+        return request -> { request.setRemoteAddr(ip); return request; };
+    }
+
     @Test void eventSortingPaginationAndValidation() throws Exception {
         MockHttpSession admin = adminSession(); JsonNode created = createWorker(admin);
         long id = created.get("workerId").asLong(); String token = login(id, created.get("temporaryPassword").asString());
@@ -322,7 +478,8 @@ class WorkersafetyServerApplicationTests {
     }
 
     private MockHttpSession adminSession() throws Exception {
-        return (MockHttpSession) mvc.perform(post("/admin/login").with(csrf()).param("adminId", ADMIN).param("password", PASSWORD))
+        return (MockHttpSession) mvc.perform(post("/admin/login").with(remoteIp("192.0.2." + (1 + java.util.concurrent.ThreadLocalRandom.current().nextInt(200))))
+                        .with(csrf()).param("adminId", ADMIN).param("password", PASSWORD))
                 .andExpect(status().is3xxRedirection()).andExpect(redirectedUrl("/admin/dashboard")).andReturn().getRequest().getSession(false);
     }
     private JsonNode createWorker(MockHttpSession admin) throws Exception {
@@ -334,6 +491,7 @@ class WorkersafetyServerApplicationTests {
     }
     private String login(long id, String password) throws Exception {
         String result = mvc.perform(post("/api/worker/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .with(remoteIp("198.51.100." + (1 + java.util.concurrent.ThreadLocalRandom.current().nextInt(200))))
                 .content(json.writeValueAsString(Map.of("workerId", id, "password", password))))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
         return json.readTree(result).get("accessToken").asString();

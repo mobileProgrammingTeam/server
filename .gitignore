@@ -32,4 +32,8 @@ build/
 ### VS Code ###
 .vscode/
 
+#로컬 환경 설정과 비밀번호
 .env
+
+# 코드 적용용 패치 파일
+*.patch

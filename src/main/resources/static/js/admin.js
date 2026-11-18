@@ -33,17 +33,36 @@
 
     const workerPage = document.getElementById('workers-page');
     if (workerPage) {
-        workerPage.querySelectorAll('.reset-password').forEach(button => button.addEventListener('click', async () => {
+        // Delegate deletion and password-reset clicks so refreshed worker rows remain interactive.
+        workerPage.addEventListener('click', async event => {
+            const button = event.target.closest('.reset-password, .delete-worker');
+            if (!button) return;
+            const deleting = button.classList.contains('delete-worker');
+            if (deleting && !window.confirm('이 작업자를 삭제할까요? 로그인은 차단되고 안전 이벤트 이력은 보존됩니다.')) return;
             button.disabled = true;
             try {
-                const result = await request(`/api/admin/workers/${button.dataset.workerId}/reset-password`, { method: 'POST' });
+                const workerId = encodeURIComponent(button.dataset.workerId);
+                if (deleting) {
+                    await request(`/api/admin/workers/${workerId}`, { method: 'DELETE' });
+                    const row = button.closest('tr');
+                    row.querySelector('td:nth-child(2) a').textContent = '탈퇴한 작업자';
+                    row.cells[2].textContent = '-';
+                    row.cells[3].textContent = '-';
+                    row.cells[4].textContent = '탈퇴';
+                    row.cells[row.cells.length - 1].replaceChildren();
+                    document.getElementById('credentials').hidden = true;
+                    document.getElementById('created-summary').textContent = '';
+                    announce('작업자를 삭제했습니다.');
+                    return;
+                }
+                const result = await request(`/api/admin/workers/${workerId}/reset-password`, { method: 'POST' });
                 const credentials = document.getElementById('credentials');
                 document.getElementById('created-summary').textContent = `작업자 ID: ${result.workerId}, 임시 비밀번호: ${result.temporaryPassword} (지금 전달하세요)`;
                 document.getElementById('created-worker-link').hidden = true;
                 credentials.hidden = false;
             } catch (error) { announce(error.message); }
             finally { button.disabled = false; }
-        }));
+        });
 
         const form = document.getElementById('worker-form');
         form.addEventListener('submit', async event => {

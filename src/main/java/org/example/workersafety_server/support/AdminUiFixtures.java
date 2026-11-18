@@ -64,7 +64,7 @@ public final class AdminUiFixtures {
             new Warning(2001, 103, "박지훈", at("2026-11-01T23:46:00Z"), "제한구역에 접근했습니다. 안전 구역으로 이동하세요."));
     public static final List<RestrictedResponse> RESTRICTED_RESPONSES = List.of(
             new RestrictedResponse(3001, 103, "박지훈", "관리자 대응 메시지 예시입니다.", at("2026-11-01T23:55:00Z"), "관리자"));
-    public static final Weather WEATHER = new Weather("현장 지역 미설정", 33, 68, "더위", at("2026-11-01T23:55:00Z"), "DEMO");
+    // Current weather moved to WeatherService. Weather notices still use fixtures.
     public static final List<WeatherNotice> WEATHER_NOTICES = List.of(
             new WeatherNotice(4001, "고온 환경에서 휴식 시간을 확인하세요.", "관리자", at("2026-11-01T23:40:00Z")));
     public static final List<AuditRecord> AUDIT = List.of(

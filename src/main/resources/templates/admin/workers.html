@@ -27,7 +27,9 @@
             <td th:text="${worker.workerId}">-</td><td><a th:href="@{/admin/workers/{id}(id=${worker.workerId})}" th:text="${worker.workerName}">작업자</a></td>
             <td th:text="${worker.sex == null ? '-' : worker.sex}">-</td><td th:text="${worker.age == null ? '-' : worker.age}">-</td>
             <td th:text="${worker.enabled ? '활성' : '탈퇴'}">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
-            <td><button type="button" class="reset-password" th:if="${worker.enabled}" th:attr="data-worker-id=${worker.workerId}">비밀번호 초기화</button></td>
+            <td><button type="button" class="reset-password" th:if="${worker.enabled}" th:attr="data-worker-id=${worker.workerId}">비밀번호 초기화</button>
+              <!-- Added administrator deletion action for active workers. -->
+              <button type="button" class="delete-worker" th:if="${worker.enabled}" th:attr="data-worker-id=${worker.workerId}">삭제</button></td>
           </tr><tr th:if="${workersPage.items.empty}"><td class="empty" colspan="11">등록된 작업자가 없습니다. 위에서 작업자 계정을 생성하세요.</td></tr></tbody>
         </table></div>
         <div class="pagination"><a class="button-link" th:if="${page > 0}" th:href="@{/admin/workers(page=${page - 1})}">이전</a><span th:text="|${page + 1} / ${T(java.lang.Math).max(workersPage.totalPages, 1)} 페이지|">1 페이지</span><a class="button-link" th:if="${page + 1 < workersPage.totalPages}" th:href="@{/admin/workers(page=${page + 1})}">다음</a></div>

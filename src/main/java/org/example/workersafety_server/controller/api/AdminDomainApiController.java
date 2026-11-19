@@ -3,6 +3,7 @@ package org.example.workersafety_server.controller.api;
 import jakarta.validation.Valid;
 import org.example.workersafety_server.dto.AdminUiModels.*;
 import org.example.workersafety_server.dto.ApiModels.PageResponse;
+import org.example.workersafety_server.service.WeatherService;
 import org.example.workersafety_server.support.AdminUiFixtures;
 import org.springframework.web.bind.annotation.*;
 
@@ -10,6 +11,11 @@ import org.springframework.web.bind.annotation.*;
 @RestController
 @RequestMapping("/api/admin")
 public class AdminDomainApiController {
+    private final WeatherService weatherService;
+
+    public AdminDomainApiController(WeatherService weatherService) {
+        this.weatherService = weatherService;
+    }
 
     @GetMapping("/dashboard")
     public Dashboard dashboard() {
@@ -58,10 +64,10 @@ public class AdminDomainApiController {
         return AdminUiFixtures.RESTRICTED_RESPONSES;
     }
 
+    // Replaced the current-weather fixture with a live provider lookup.
     @GetMapping("/weather/current")
     public Weather weather() {
-        // TODO: retrieve weather for the configured site and include the provider and observation time.
-        return AdminUiFixtures.WEATHER;
+        return weatherService.current();
     }
 
     @GetMapping("/weather/notices")

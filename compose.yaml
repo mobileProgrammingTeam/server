@@ -21,6 +21,10 @@ services:
       ADMIN_LOGIN_ID: ${ADMIN_LOGIN_ID:-}
       ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
       MOBILE_TOKEN_TTL: ${MOBILE_TOKEN_TTL:-PT12H}
+      # Added weather integration: pass .env values into the Spring Boot server container.
+      WEATHER_SITE_NAME: ${WEATHER_SITE_NAME:-Worksite}
+      WEATHER_SITE_LATITUDE: ${WEATHER_SITE_LATITUDE:-}
+      WEATHER_SITE_LONGITUDE: ${WEATHER_SITE_LONGITUDE:-}
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
       SPRING_DATASOURCE_URL: jdbc:postgresql://database:5432/${POSTGRES_DB:-workersafety}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-workersafety}

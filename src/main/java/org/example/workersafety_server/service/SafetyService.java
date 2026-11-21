@@ -117,7 +117,7 @@ public class SafetyService {
     public void logout(String rawToken) { tokens.revoke(hash(rawToken), now()); }
 
     @Transactional(readOnly = true)
-    public WorkerInfo worker(long id) { return workerInfo(profile(id)); }
+    public WorkerInfo worker(long id) { return workerInfo(activeProfile(id)); }
 
     @Transactional(readOnly = true)
     public PageResponse<WorkerInfo> workers(int page, int size) {

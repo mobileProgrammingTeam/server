@@ -195,6 +195,32 @@ class WorkersafetyServerApplicationTests {
         mvc.perform(post("/api/admin/workers/{id}/reset-password", id).session(admin).with(csrf())).andExpect(status().isNotFound());
     }
 
+    // Regression coverage for administrator authorization, CSRF, repeat deletion and retained history.
+    @Test void adminCanDeleteWorkerOnlyWithCsrfAndKeepHistory() throws Exception {
+        MockHttpSession admin = adminSession();
+        JsonNode created = createWorker(admin);
+        long id = created.get("workerId").asLong();
+        String password = created.get("temporaryPassword").asString();
+        String token = login(id, password);
+        mvc.perform(post("/api/worker/events").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("time", "2026-01-01T09:00:00Z",
+                        "eventType", "FALL_DETECTED", "alertSender", "ACCELEROMETER"))))
+                .andExpect(status().isCreated());
+
+        mvc.perform(delete("/api/admin/workers/{id}", id).with(csrf())).andExpect(status().isUnauthorized());
+        mvc.perform(delete("/api/admin/workers/{id}", id).session(admin)).andExpect(status().isForbidden());
+        mvc.perform(delete("/api/admin/workers/{id}", id).session(admin).with(csrf())).andExpect(status().isNoContent());
+        mvc.perform(delete("/api/admin/workers/{id}", id).session(admin).with(csrf())).andExpect(status().isNoContent());
+        mvc.perform(get("/api/worker/me").header("Authorization", "Bearer " + token)).andExpect(status().isUnauthorized());
+        mvc.perform(post("/api/worker/auth/login").contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("workerId", id, "password", password))))
+                .andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/admin/events").session(admin).param("workerId", Long.toString(id)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1))
+                .andExpect(jsonPath("$.items[0].workerName").value("탈퇴한 작업자"));
+    }
+
     @Test void passwordChangesAndResetRevokeAllTokens() throws Exception {
         MockHttpSession admin = adminSession(); JsonNode created = createWorker(admin);
         long id = created.get("workerId").asLong(); String password = created.get("temporaryPassword").asString();

@@ -325,20 +325,33 @@
     }
 
     document.addEventListener('click', async event => {
-        const resetButton = event.target.closest('.reset-password');
-        if (resetButton) {
-            resetButton.disabled = true;
+        const workerAction = event.target.closest('.reset-password, .delete-worker');
+        if (workerAction) {
+            const deleting = workerAction.classList.contains('delete-worker');
+            if (deleting && !window.confirm('이 작업자를 삭제할까요? 로그인은 차단되고 안전 이벤트 이력은 보존됩니다.')) return;
+            workerAction.disabled = true;
             try {
-                const result = await request(`/api/admin/workers/${resetButton.dataset.workerId}/reset-password`, { method: 'POST' });
-                const credentials = document.getElementById('credentials');
-                if (credentials) {
-                    document.getElementById('created-summary').textContent = `작업자 ID: ${result.workerId}, 임시 비밀번호: ${result.temporaryPassword} (지금 전달하세요)`;
-                    document.getElementById('created-worker-link').hidden = true;
-                    credentials.hidden = false;
+                const workerId = encodeURIComponent(workerAction.dataset.workerId);
+                if (deleting) {
+                    await request(`/api/admin/workers/${workerId}`, { method: 'DELETE' });
+                    const credentials = document.getElementById('credentials');
+                    const summary = document.getElementById('created-summary');
+                    if (credentials) credentials.hidden = true;
+                    if (summary) summary.textContent = '';
+                    announce('작업자를 삭제했습니다.');
+                    refreshForEvent('worker-deleted', { workerId: Number(workerId) });
+                } else {
+                    const result = await request(`/api/admin/workers/${workerId}/reset-password`, { method: 'POST' });
+                    const credentials = document.getElementById('credentials');
+                    if (credentials) {
+                        document.getElementById('created-summary').textContent = `작업자 ID: ${result.workerId}, 임시 비밀번호: ${result.temporaryPassword} (지금 전달하세요)`;
+                        document.getElementById('created-worker-link').hidden = true;
+                        credentials.hidden = false;
+                    }
+                    refreshForEvent('worker-status-changed', { workerId: Number(workerId) });
                 }
-                refreshForEvent('worker-status-changed', { workerId: Number(resetButton.dataset.workerId) });
             } catch (error) { announce(error.message); }
-            finally { resetButton.disabled = false; }
+            finally { workerAction.disabled = false; }
             return;
         }
 

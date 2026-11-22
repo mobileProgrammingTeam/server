@@ -42,6 +42,13 @@ public class AdminApiController {
     }
     @GetMapping("/workers/{workerId}")
     public WorkerInfo worker(@PathVariable long workerId) { return service.worker(workerId); }
+    // Added administrator deletion endpoint. Reuses account deactivation and token revocation.
+    @DeleteMapping("/workers/{workerId}")
+    public ResponseEntity<Void> delete(@PathVariable long workerId) {
+        service.deleteWorker(workerId);
+        return ResponseEntity.noContent().build();
+    }
+
     @PostMapping("/workers/{workerId}/reset-password")
     public ResponseEntity<WorkerCreated> reset(@PathVariable long workerId) {
         return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.resetPassword(workerId));

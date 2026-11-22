@@ -1,7 +1,9 @@
 package org.example.workersafety_server.controller.web;
 
 import org.example.workersafety_server.entity.EventType;
+import org.example.workersafety_server.exception.ApiException;
 import org.example.workersafety_server.service.SafetyService;
+import org.example.workersafety_server.service.WeatherService;
 import org.springframework.security.core.Authentication;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Controller;
@@ -13,7 +15,12 @@ import org.springframework.web.bind.annotation.RequestParam;
 @Controller
 public class AdminWebController {
     private final SafetyService service;
-    public AdminWebController(SafetyService service) { this.service = service; }
+    private final WeatherService weatherService;
+
+    public AdminWebController(SafetyService service, WeatherService weatherService) {
+        this.service = service;
+        this.weatherService = weatherService;
+    }
 
     @GetMapping("/admin/login") public String login() { return "admin/login"; }
     @GetMapping("/admin/register") public String register() { return "redirect:/admin/workers#worker-create"; }
@@ -81,7 +88,15 @@ public class AdminWebController {
         model.addAttribute("workersPage", service.workers(0, 100));
         return "admin/connectivity";
     }
-    @GetMapping("/admin/weather") public String weather() { return "admin/weather"; }
+    // Load weather for Thymeleaf and display a readable message if the provider fails.
+    @GetMapping("/admin/weather") public String weather(Model model) {
+        try {
+            model.addAttribute("weather", weatherService.current());
+        } catch (ApiException e) {
+            model.addAttribute("weatherError", e.getMessage());
+        }
+        return "admin/weather";
+    }
     @GetMapping("/admin/reports") public String reports(@RequestParam(defaultValue = "0") int page,
                                                           @RequestParam(required = false) String fragment,
                                                           HttpServletResponse response, Model model) {

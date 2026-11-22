@@ -192,13 +192,35 @@ public class SafetyService {
                         .orElseThrow(ApiException::unauthorized);
                 if (!matchesPassword(request.currentPassword(), account.getPasswordHash())) throw ApiException.unauthorized();
                 WorkerProfile profile = workers.findById(id).orElseThrow(() -> ApiException.notFound("WORKER_NOT_FOUND", "작업자 정보를 찾을 수 없습니다."));
-                Instant time = now();
-                account.setEnabled(false); account.setDeletedAt(time); account.setUpdatedAt(time);
-                account.setPasswordHash(encoder.encode(randomString(32)));
-                profile.setWorkerName("탈퇴한 작업자"); profile.setSex(null); profile.setAge(null);
-                tokens.revokeAll(id, time);
-                eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-deleted", id));
+                deactivateWorker(profile);
             });
+    }
+
+    // Administrator deletion is repeatable. Keep the profile and event history in the database.
+    public void deleteWorker(long id) {
+        transactions.executeWithoutResult(status -> {
+            Account account = accounts.findByIdForUpdate(id)
+                    .filter(a -> a.getRole() == Role.WORKER)
+                    .orElseThrow(() -> ApiException.notFound("WORKER_NOT_FOUND", "작업자 정보를 찾을 수 없습니다."));
+            WorkerProfile profile = workers.findById(id)
+                    .orElseThrow(() -> ApiException.notFound("WORKER_NOT_FOUND", "작업자 정보를 찾을 수 없습니다."));
+            if (account.getDeletedAt() == null) deactivateWorker(profile);
+        });
+    }
+
+    // Shared by worker withdrawal and administrator deletion to keep cleanup consistent.
+    private void deactivateWorker(WorkerProfile profile) {
+        Instant time = now();
+        Account account = profile.getAccount();
+        account.setEnabled(false);
+        account.setDeletedAt(time);
+        account.setUpdatedAt(time);
+        account.setPasswordHash(encoder.encode(randomString(32)));
+        profile.setWorkerName("탈퇴한 작업자");
+        profile.setSex(null);
+        profile.setAge(null);
+        tokens.revokeAll(profile.getId(), time);
+        eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-deleted", profile.getId()));
     }
 
     @Transactional

@@ -6,12 +6,14 @@ import org.example.workersafety_server.entity.*;
 import org.example.workersafety_server.exception.ApiException;
 import org.example.workersafety_server.repository.*;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.*;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.example.workersafety_server.service.event.AdminDataChangedEvent;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -35,13 +37,14 @@ public class SafetyService {
     private final Clock clock;
     private final Duration tokenTtl;
     private final TransactionTemplate transactions;
+    private final ApplicationEventPublisher eventPublisher;
     private final SecureRandom random = new SecureRandom();
 
     public SafetyService(AccountRepository accounts, WorkerProfileRepository workers, SafetyEventRepository events,
                          MobileTokenRepository tokens, PasswordEncoder encoder, Clock clock, TransactionTemplate transactions,
-                         @Value("${app.token-ttl:PT12H}") Duration tokenTtl) {
+                         @Value("${app.token-ttl:PT12H}") Duration tokenTtl, ApplicationEventPublisher eventPublisher) {
         this.accounts = accounts; this.workers = workers; this.events = events; this.tokens = tokens;
-        this.encoder = encoder; this.clock = clock; this.transactions = transactions; this.tokenTtl = tokenTtl;
+        this.encoder = encoder; this.clock = clock; this.transactions = transactions; this.tokenTtl = tokenTtl; this.eventPublisher = eventPublisher;
     }
 
     @PostConstruct
@@ -76,6 +79,7 @@ public class SafetyService {
         profile.setAccount(account); profile.setWorkerName(request.workerName().trim());
         profile.setSex(request.sex()); profile.setAge(request.age());
         workers.saveAndFlush(profile);
+        eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-created", account.getId()));
         return new WorkerCreated(account.getId(), password);
     }
 
@@ -89,6 +93,7 @@ public class SafetyService {
                     if (account.getFailedLoginCount() >= 6) {
                         account.setLoginLockedAt(now());
                         tokens.revokeAll(account.getId(), now());
+                        eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-status-changed", account.getId()));
                     }
                     return null;
                 }
@@ -129,22 +134,28 @@ public class SafetyService {
         if (changes.isEmpty() || !Set.of("workerName", "sex", "age").containsAll(changes.keySet()) || changes.containsValue(null))
             throw ApiException.badRequest("수정할 개인정보를 확인하세요.");
         WorkerProfile profile = activeProfile(id);
+        boolean changed = false;
         if (changes.containsKey("workerName")) {
             Object value = changes.get("workerName");
             if (!(value instanceof String name) || name.isBlank() || name.length() > 50) throw ApiException.badRequest("이름을 확인하세요.");
-            profile.setWorkerName(name.trim());
+            String normalized = name.trim();
+            changed |= !normalized.equals(profile.getWorkerName());
+            profile.setWorkerName(normalized);
         }
         if (changes.containsKey("sex")) {
             Object value = changes.get("sex");
             if (!(value instanceof String sex) || !Set.of("M", "F", "U").contains(sex)) throw ApiException.badRequest("성별을 확인하세요.");
+            changed |= !sex.equals(profile.getSex());
             profile.setSex(sex);
         }
         if (changes.containsKey("age")) {
             Object value = changes.get("age");
             if (!(value instanceof Integer age) || age < 0 || age > 150) throw ApiException.badRequest("나이를 확인하세요.");
+            changed |= !age.equals(profile.getAge());
             profile.setAge(age);
         }
         profile.getAccount().setUpdatedAt(now());
+        if (changed) eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-updated", id));
         return workerInfo(profile);
     }
 
@@ -153,9 +164,11 @@ public class SafetyService {
             transactions.executeWithoutResult(status -> {
                 Account account = accounts.findByIdForUpdate(id).filter(a -> a.getRole() == Role.WORKER && a.isEnabled() && a.getDeletedAt() == null).orElseThrow(ApiException::unauthorized);
                 if (!matchesPassword(request.currentPassword(), account.getPasswordHash())) throw ApiException.unauthorized();
+                boolean wasLocked = account.getLoginLockedAt() != null;
                 account.setPasswordHash(encoder.encode(request.newPassword())); account.setUpdatedAt(now());
                 account.setFailedLoginCount(0); account.setLoginLockedAt(null);
                 tokens.revokeAll(id, now());
+                if (wasLocked) eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-status-changed", id));
             });
     }
 
@@ -163,9 +176,11 @@ public class SafetyService {
             return transactions.execute(status -> {
                 Account account = accounts.findByIdForUpdate(id).filter(a -> a.getRole() == Role.WORKER && a.isEnabled() && a.getDeletedAt() == null).orElseThrow(() -> ApiException.notFound("WORKER_NOT_FOUND", "작업자 정보를 찾을 수 없습니다."));
                 String password = "0000";
+                boolean wasLocked = account.getLoginLockedAt() != null;
                 account.setPasswordHash(encoder.encode(password)); account.setUpdatedAt(now());
                 account.setFailedLoginCount(0); account.setLoginLockedAt(null);
                 tokens.revokeAll(id, now());
+                if (wasLocked) eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-status-changed", id));
                 return new WorkerCreated(id, password);
             });
     }
@@ -182,6 +197,7 @@ public class SafetyService {
                 account.setPasswordHash(encoder.encode(randomString(32)));
                 profile.setWorkerName("탈퇴한 작업자"); profile.setSex(null); profile.setAge(null);
                 tokens.revokeAll(id, time);
+                eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-deleted", id));
             });
     }
 
@@ -190,7 +206,9 @@ public class SafetyService {
         SafetyEvent event = new SafetyEvent();
         event.setWorker(activeProfile(id)); event.setOccurredAt(Instant.ofEpochMilli(request.time().toEpochMilli())); event.setReceivedAt(now());
         event.setEventType(request.eventType()); event.setAlertSender(request.alertSender().trim());
-        return eventInfo(events.saveAndFlush(event));
+        SafetyEvent saved = events.saveAndFlush(event);
+        eventPublisher.publishEvent(AdminDataChangedEvent.event("event-created", saved.getId(), id));
+        return eventInfo(saved);
     }
 
     @Transactional(readOnly = true)
@@ -215,10 +233,11 @@ public class SafetyService {
         String normalizedMemo = memo.trim();
         if (normalizedMemo.isEmpty() || normalizedMemo.length() > 500)
             throw ApiException.badRequest("처리 메모는 공백을 제외하고 1~500자여야 합니다.");
+        SafetyEvent current = findEvent(id);
         if (events.process(id, admin, now(), normalizedMemo) == 0) {
-            findEvent(id);
             throw ApiException.conflict("EVENT_ALREADY_PROCESSED", "이미 처리된 이벤트입니다.");
         }
+        eventPublisher.publishEvent(AdminDataChangedEvent.event("event-processed", id, current.getWorker().getId()));
         return eventInfo(findEvent(id));
     }
 

@@ -3,6 +3,7 @@ package org.example.workersafety_server;
 import org.example.workersafety_server.entity.Role;
 import org.example.workersafety_server.repository.AccountRepository;
 import org.example.workersafety_server.service.SafetyService;
+import org.example.workersafety_server.service.AdminEventStreamHub;
 import org.example.workersafety_server.controller.api.HealthController;
 import org.example.workersafety_server.security.BearerTokenFilter;
 import org.example.workersafety_server.security.LoginAttemptFilter;
@@ -72,6 +73,7 @@ class WorkersafetyServerApplicationTests {
     @Autowired JdbcTemplate jdbc;
     @Autowired AccountRepository accounts;
     @Autowired SafetyService service;
+    @Autowired AdminEventStreamHub adminEventStreamHub;
     @Autowired org.springframework.security.crypto.password.PasswordEncoder encoder;
     @Autowired PlatformTransactionManager transactionManager;
     @Autowired org.springframework.context.ApplicationContext context;
@@ -120,6 +122,37 @@ class WorkersafetyServerApplicationTests {
                 .content(json.writeValueAsString(Map.of("workerId", adminId, "password", PASSWORD)))).andExpect(status().isUnauthorized());
         mvc.perform(post("/admin/logout").session(session).with(csrf())).andExpect(status().is3xxRedirection());
         mvc.perform(get("/admin/dashboard").session(session)).andExpect(status().is3xxRedirection());
+    }
+
+    @Test void adminSseRequiresSessionAndFragmentsRenderFromExistingQueries() throws Exception {
+        mvc.perform(get("/api/admin/session")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/admin/stream").header("Authorization", "Bearer invalid-worker-token"))
+                .andExpect(status().isUnauthorized());
+
+        MockHttpSession admin = adminSession();
+        mvc.perform(get("/api/admin/session").session(admin)).andExpect(status().isNoContent())
+                .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")));
+        mvc.perform(get("/api/admin/stream").session(admin))
+                .andExpect(request().asyncStarted())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")))
+                .andExpect(header().string("X-Accel-Buffering", "no"));
+        assertThat(adminEventStreamHub.connectionCount()).isEqualTo(1);
+        adminEventStreamHub.closeSession(admin.getId());
+        assertThat(adminEventStreamHub.connectionCount()).isZero();
+
+        assertThat(mvc.perform(get("/admin/dashboard").param("fragment", "live").session(admin))
+                .andExpect(status().isOk()).andExpect(header().string("Cache-Control", "no-store"))
+                .andReturn().getResponse().getContentAsString()).contains("id=\"dashboard-live\"");
+        assertThat(mvc.perform(get("/admin/alerts").param("fragment", "list").session(admin))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).contains("id=\"alert-list\"");
+        assertThat(mvc.perform(get("/admin/events").param("fragment", "list").param("processed", "false").session(admin))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).contains("id=\"event-list\"");
+        assertThat(mvc.perform(get("/admin/reports").param("fragment", "live").session(admin))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).contains("id=\"report-live\"");
+        long workerId = createWorker(admin).get("workerId").asLong();
+        assertThat(mvc.perform(get("/admin/workers/{id}", workerId).param("fragment", "live").session(admin))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).contains("id=\"worker-detail-live\"");
     }
 
     @Test void workerEventProcessingAndWithdrawalKeepHistory() throws Exception {
@@ -256,7 +289,8 @@ class WorkersafetyServerApplicationTests {
         when(txManager.getTransaction(any())).thenReturn(new org.springframework.transaction.support.SimpleTransactionStatus());
         var isolated = new SafetyService(accountRepo, mock(WorkerProfileRepository.class), mock(SafetyEventRepository.class),
                 mock(MobileTokenRepository.class), mock(org.springframework.security.crypto.password.PasswordEncoder.class),
-                Clock.systemUTC(), new org.springframework.transaction.support.TransactionTemplate(txManager), Duration.ofHours(12));
+                Clock.systemUTC(), new org.springframework.transaction.support.TransactionTemplate(txManager), Duration.ofHours(12),
+                mock(org.springframework.context.ApplicationEventPublisher.class));
         assertThatThrownBy(() -> isolated.bootstrap("", "")).isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("ADMIN_LOGIN_ID");
         DataSource unavailable = mock(DataSource.class);

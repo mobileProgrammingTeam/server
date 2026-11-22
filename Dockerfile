@@ -2,7 +2,8 @@
 FROM eclipse-temurin:17.0.21.1_2-jdk-noble AS build
 WORKDIR /build
 
-COPY .mvn mvnw pom.xml ./
+COPY .mvn .mvn
+COPY mvnw pom.xml ./
 COPY src src
 
 RUN chmod +x mvnw && ./mvnw -B -DskipTests package

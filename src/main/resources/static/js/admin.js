@@ -27,24 +27,28 @@
     const pageType = page?.dataset.livePage;
     let eventSource, reconnectTimer, mergeTimer, sessionCheckAt = 0, reconnectDelay = 1000, streamErrors = 0;
     let requestController, requestGeneration = 0, dirty = false, refreshing = false;
-    let status, manualRefresh;
+    let status, statusMessage, manualRefresh;
 
     function updateStatus(message, showButton = false) {
+        if (!message) {
+            if (status) status.hidden = true;
+            return;
+        }
         if (!status) {
-            status = document.createElement('p');
+            status = document.createElement('div');
             status.id = 'live-status';
             status.setAttribute('role', 'status');
-            (notice || page)?.insertAdjacentElement(notice ? 'afterend' : 'beforebegin', status);
-        }
-        status.textContent = message;
-        if (!manualRefresh) {
+            statusMessage = document.createElement('span');
             manualRefresh = document.createElement('button');
             manualRefresh.type = 'button';
             manualRefresh.textContent = '화면 새로고침';
             manualRefresh.addEventListener('click', refreshCurrentPage);
-            status.insertAdjacentElement('afterend', manualRefresh);
+            status.append(statusMessage, manualRefresh);
+            page?.prepend(status);
         }
+        statusMessage.textContent = message;
         manualRefresh.hidden = !showButton;
+        status.hidden = false;
     }
 
     function currentFragmentRequest() {
@@ -173,7 +177,7 @@
                     if (eventId) await refreshOpenDetail(eventId, memo);
                 }
             }
-            updateStatus('최신 정보로 갱신했습니다.');
+            updateStatus('');
         } catch (error) {
             if (error.name !== 'AbortError') updateStatus('자동 갱신에 실패했습니다. 수동으로 다시 시도할 수 있습니다.', true);
         } finally {
@@ -269,7 +273,7 @@
         eventSource.addEventListener('connected', () => {
             streamErrors = 0;
             reconnectDelay = 1000;
-            updateStatus('실시간 자동 갱신 중입니다.');
+            updateStatus('');
             refreshCurrentPage();
         });
         ['event-created', 'event-processed', 'worker-created', 'worker-updated', 'worker-deleted', 'worker-status-changed']

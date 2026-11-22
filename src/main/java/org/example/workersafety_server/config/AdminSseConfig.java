@@ -4,6 +4,7 @@ import org.example.workersafety_server.service.AdminEventStreamHub;
 import org.example.workersafety_server.security.AdminSseSessionListener;
 import org.springframework.boot.web.servlet.ServletListenerRegistrationBean;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.scheduling.concurrent.CustomizableThreadFactory;
@@ -35,8 +36,14 @@ public class AdminSseConfig implements WebMvcConfigurer {
 
     @Bean AdminEventStreamHub adminEventStreamHub(@Qualifier("adminSseSender") Executor sender,
                                                   @Qualifier("adminSseScheduler") ScheduledExecutorService scheduler,
-                                                  tools.jackson.databind.ObjectMapper json) {
-        return new AdminEventStreamHub(sender, scheduler, json);
+                                                  tools.jackson.databind.ObjectMapper json,
+                                                  @Value("${app.admin-sse.max-per-session:8}") int maxPerSession,
+                                                  @Value("${app.admin-sse.max-connections:256}") int maxPerInstance,
+                                                  @Value("${app.admin-sse.max-pending-per-connection:64}") int maxPendingPerConnection,
+                                                  @Value("${app.admin-sse.timeout:PT5M}") java.time.Duration timeout,
+                                                  @Value("${app.admin-sse.heartbeat:PT25S}") java.time.Duration heartbeat) {
+        return new AdminEventStreamHub(sender, scheduler, json, maxPerSession, maxPerInstance,
+                maxPendingPerConnection, timeout, heartbeat);
     }
 
     @Bean ServletListenerRegistrationBean<AdminSseSessionListener> adminSseSessionListener(AdminEventStreamHub hub) {

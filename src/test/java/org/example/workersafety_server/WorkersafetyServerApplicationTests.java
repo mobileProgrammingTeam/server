@@ -4,6 +4,7 @@ import org.example.workersafety_server.entity.Role;
 import org.example.workersafety_server.repository.AccountRepository;
 import org.example.workersafety_server.service.SafetyService;
 import org.example.workersafety_server.service.AdminEventStreamHub;
+import org.example.workersafety_server.service.WeatherService;
 import org.example.workersafety_server.controller.api.HealthController;
 import org.example.workersafety_server.security.BearerTokenFilter;
 import org.example.workersafety_server.security.LoginAttemptFilter;
@@ -97,6 +98,13 @@ class WorkersafetyServerApplicationTests {
             }
         }
         assertThatThrownBy(() -> jdbc.update("INSERT INTO worker_profiles(worker_id,worker_name,sex,age) VALUES (?,?,?,?)", -1, "invalid", "U", 1)).isInstanceOf(Exception.class);
+    }
+
+    @Test void weatherReportsMissingSiteCoordinatesWithoutCallingProvider() {
+        var weather = new WeatherService(json, "현장", "", "");
+        assertThatThrownBy(weather::current)
+                .isInstanceOf(ApiException.class)
+                .hasMessage("현장 위도와 경도를 설정해 주세요.");
     }
 
     @Test void authenticationAndCsrfAreSeparated() throws Exception {

@@ -132,6 +132,9 @@ td a:hover,.surface-head a:hover { text-decoration:underline; }
 .page-heading p { margin:4px 0; }
 #notice { margin:0 32px; min-height:0; font-size:13px; color:#315b91; }
 #notice:empty { display:none; }
+#live-status { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:0 0 20px; padding:12px 16px; border:1px solid #f0d7a8; border-radius:8px; background:#fff5e3; color:#805400; font-size:13px; }
+#live-status > span { flex:1 1 240px; overflow-wrap:anywhere; }
+#live-status > button { flex:none; background:#fff; color:#805400; border-color:#f0d7a8; font-size:12px; }
 dialog { border:1px solid #dce5f0; border-radius:15px; box-shadow:0 24px 70px #12233f44; }
 .login { margin:50px auto; border-radius:16px; border-color:#e1e9f3; box-shadow:0 12px 32px #1b2c480f; }
 .login { width:100%; }

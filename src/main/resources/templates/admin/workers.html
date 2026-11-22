@@ -7,7 +7,7 @@
   <div class="workspace">
     <header th:replace="~{admin/fragments :: topbar}"></header>
     <p id="notice" role="status" aria-live="polite"></p>
-    <main id="workers-page">
+    <main id="workers-page" data-live-page="workers">
       <div class="page-heading"><div><p class="eyebrow">WORKER MANAGEMENT</p><h1>작업자</h1><p class="muted">작업자 계정과 등록 정보를 관리합니다.</p></div></div>
       <section class="surface panel" id="worker-create">
         <div class="surface-head"><div><h2>작업자 계정 생성</h2><p>생성 후 임시 비밀번호를 작업자에게 안전하게 전달하세요.</p></div></div>
@@ -26,7 +26,7 @@
           <tbody><tr th:each="worker : ${workersPage.items}" th:attr="data-worker-id=${worker.workerId}">
             <td th:text="${worker.workerId}">-</td><td><a th:href="@{/admin/workers/{id}(id=${worker.workerId})}" th:text="${worker.workerName}">작업자</a></td>
             <td th:text="${worker.sex == null ? '-' : worker.sex}">-</td><td th:text="${worker.age == null ? '-' : worker.age}">-</td>
-            <td th:text="${worker.enabled ? '활성' : '탈퇴'}">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+            <td th:text="${worker.deleted ? '탈퇴' : (worker.loginLocked ? '로그인 잠금' : (worker.enabled ? '활성' : '비활성'))}">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
             <td><button type="button" class="reset-password" th:if="${worker.enabled}" th:attr="data-worker-id=${worker.workerId}">비밀번호 초기화</button></td>
           </tr><tr th:if="${workersPage.items.empty}"><td class="empty" colspan="11">등록된 작업자가 없습니다. 위에서 작업자 계정을 생성하세요.</td></tr></tbody>
         </table></div>

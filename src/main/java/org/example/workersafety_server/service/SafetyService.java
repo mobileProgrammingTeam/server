@@ -6,12 +6,14 @@ import org.example.workersafety_server.entity.*;
 import org.example.workersafety_server.exception.ApiException;
 import org.example.workersafety_server.repository.*;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.data.domain.*;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
+import org.example.workersafety_server.service.event.AdminDataChangedEvent;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -35,14 +37,14 @@ public class SafetyService {
     private final Clock clock;
     private final Duration tokenTtl;
     private final TransactionTemplate transactions;
+    private final ApplicationEventPublisher eventPublisher;
     private final SecureRandom random = new SecureRandom();
-    private final Object credentialLock = new Object();
 
     public SafetyService(AccountRepository accounts, WorkerProfileRepository workers, SafetyEventRepository events,
                          MobileTokenRepository tokens, PasswordEncoder encoder, Clock clock, TransactionTemplate transactions,
-                         @Value("${app.token-ttl:PT12H}") Duration tokenTtl) {
+                         @Value("${app.token-ttl:PT12H}") Duration tokenTtl, ApplicationEventPublisher eventPublisher) {
         this.accounts = accounts; this.workers = workers; this.events = events; this.tokens = tokens;
-        this.encoder = encoder; this.clock = clock; this.transactions = transactions; this.tokenTtl = tokenTtl;
+        this.encoder = encoder; this.clock = clock; this.transactions = transactions; this.tokenTtl = tokenTtl; this.eventPublisher = eventPublisher;
     }
 
     @PostConstruct
@@ -51,8 +53,7 @@ public class SafetyService {
     }
 
     public void bootstrap(String loginId, String password) {
-        synchronized (credentialLock) {
-            transactions.executeWithoutResult(status -> {
+        transactions.executeWithoutResult(status -> {
                 if (accounts.existsByRole(Role.ADMIN)) {
                     if (!accounts.existsByRoleAndEnabledTrue(Role.ADMIN)) throw new IllegalStateException("No active administrator account exists");
                     return;
@@ -64,13 +65,12 @@ public class SafetyService {
                 account.setAdminLoginId(loginId.trim()); account.setPasswordHash(encoder.encode(password));
                 account.setRole(Role.ADMIN); account.setEnabled(true); account.setCreatedAt(now()); account.setUpdatedAt(now());
                 accounts.save(account);
-            });
-        }
+        });
     }
 
     @Transactional
     public WorkerCreated createWorker(NewWorker request) {
-        String password = randomString(18);
+        String password = "0000";
         Account account = new Account();
         account.setRole(Role.WORKER); account.setEnabled(true); account.setPasswordHash(encoder.encode(password));
         account.setCreatedAt(now()); account.setUpdatedAt(now());
@@ -79,15 +79,25 @@ public class SafetyService {
         profile.setAccount(account); profile.setWorkerName(request.workerName().trim());
         profile.setSex(request.sex()); profile.setAge(request.age());
         workers.saveAndFlush(profile);
+        eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-created", account.getId()));
         return new WorkerCreated(account.getId(), password);
     }
 
     public TokenResponse login(Login request) {
-        synchronized (credentialLock) {
-            return transactions.execute(status -> {
-                Account account = accounts.findById(request.workerId()).orElseThrow(ApiException::unauthorized);
-                if (account.getRole() != Role.WORKER || !account.isEnabled() || account.getDeletedAt() != null
-                        || !matchesPassword(request.password(), account.getPasswordHash())) throw ApiException.unauthorized();
+        TokenResponse result = transactions.execute(status -> {
+                Account account = accounts.findByIdForUpdate(request.workerId()).orElseThrow(ApiException::unauthorized);
+                if (account.getRole() != Role.WORKER || !account.isEnabled() || account.getDeletedAt() != null) throw ApiException.unauthorized();
+                if (account.getLoginLockedAt() != null) return null;
+                if (!matchesPassword(request.password(), account.getPasswordHash())) {
+                    account.setFailedLoginCount(account.getFailedLoginCount() + 1);
+                    if (account.getFailedLoginCount() >= 6) {
+                        account.setLoginLockedAt(now());
+                        tokens.revokeAll(account.getId(), now());
+                        eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-status-changed", account.getId()));
+                    }
+                    return null;
+                }
+                account.setFailedLoginCount(0);
                 String raw = randomString(32);
                 Instant issued = now();
                 MobileToken token = new MobileToken();
@@ -95,14 +105,16 @@ public class SafetyService {
                 tokens.save(token);
                 return new TokenResponse(raw, "Bearer", token.getExpiresAt());
             });
-        }
+        if (result == null) throw ApiException.unauthorized();
+        return result;
     }
 
     @Transactional(readOnly = true)
     public Long authenticate(String rawToken) {
         if (rawToken == null || rawToken.length() > 256 || rawToken.isBlank()) return null;
         return tokens.findById(hash(rawToken)).filter(t -> t.getRevokedAt() == null && t.getExpiresAt().isAfter(now()))
-                .filter(t -> t.getAccount().isEnabled() && t.getAccount().getDeletedAt() == null && t.getAccount().getRole() == Role.WORKER)
+                .filter(t -> t.getAccount().isEnabled() && t.getAccount().getDeletedAt() == null
+                        && t.getAccount().getLoginLockedAt() == null && t.getAccount().getRole() == Role.WORKER)
                 .map(t -> t.getAccount().getId()).orElse(null);
     }
 
@@ -110,7 +122,7 @@ public class SafetyService {
     public void logout(String rawToken) { tokens.revoke(hash(rawToken), now()); }
 
     @Transactional(readOnly = true)
-    public WorkerInfo worker(long id) { return workerInfo(profile(id)); }
+    public WorkerInfo worker(long id) { return workerInfo(activeProfile(id)); }
 
     @Transactional(readOnly = true)
     public PageResponse<WorkerInfo> workers(int page, int size) {
@@ -122,62 +134,71 @@ public class SafetyService {
         if (changes.isEmpty() || !Set.of("workerName", "sex", "age").containsAll(changes.keySet()) || changes.containsValue(null))
             throw ApiException.badRequest("수정할 개인정보를 확인하세요.");
         WorkerProfile profile = activeProfile(id);
+        boolean changed = false;
         if (changes.containsKey("workerName")) {
             Object value = changes.get("workerName");
             if (!(value instanceof String name) || name.isBlank() || name.length() > 50) throw ApiException.badRequest("이름을 확인하세요.");
-            profile.setWorkerName(name.trim());
+            String normalized = name.trim();
+            changed |= !normalized.equals(profile.getWorkerName());
+            profile.setWorkerName(normalized);
         }
         if (changes.containsKey("sex")) {
             Object value = changes.get("sex");
             if (!(value instanceof String sex) || !Set.of("M", "F", "U").contains(sex)) throw ApiException.badRequest("성별을 확인하세요.");
+            changed |= !sex.equals(profile.getSex());
             profile.setSex(sex);
         }
         if (changes.containsKey("age")) {
             Object value = changes.get("age");
             if (!(value instanceof Integer age) || age < 0 || age > 150) throw ApiException.badRequest("나이를 확인하세요.");
+            changed |= !age.equals(profile.getAge());
             profile.setAge(age);
         }
         profile.getAccount().setUpdatedAt(now());
+        if (changed) eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-updated", id));
         return workerInfo(profile);
     }
 
     public void changePassword(long id, PasswordChange request) {
         validatePassword(request.newPassword());
-        synchronized (credentialLock) {
             transactions.executeWithoutResult(status -> {
-                Account account = activeProfile(id).getAccount();
+                Account account = accounts.findByIdForUpdate(id).filter(a -> a.getRole() == Role.WORKER && a.isEnabled() && a.getDeletedAt() == null).orElseThrow(ApiException::unauthorized);
                 if (!matchesPassword(request.currentPassword(), account.getPasswordHash())) throw ApiException.unauthorized();
+                boolean wasLocked = account.getLoginLockedAt() != null;
                 account.setPasswordHash(encoder.encode(request.newPassword())); account.setUpdatedAt(now());
+                account.setFailedLoginCount(0); account.setLoginLockedAt(null);
                 tokens.revokeAll(id, now());
+                if (wasLocked) eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-status-changed", id));
             });
-        }
     }
 
     public WorkerCreated resetPassword(long id) {
-        synchronized (credentialLock) {
             return transactions.execute(status -> {
-                Account account = activeProfile(id).getAccount();
-                String password = randomString(18);
+                Account account = accounts.findByIdForUpdate(id).filter(a -> a.getRole() == Role.WORKER && a.isEnabled() && a.getDeletedAt() == null).orElseThrow(() -> ApiException.notFound("WORKER_NOT_FOUND", "작업자 정보를 찾을 수 없습니다."));
+                String password = "0000";
+                boolean wasLocked = account.getLoginLockedAt() != null;
                 account.setPasswordHash(encoder.encode(password)); account.setUpdatedAt(now());
+                account.setFailedLoginCount(0); account.setLoginLockedAt(null);
                 tokens.revokeAll(id, now());
+                if (wasLocked) eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-status-changed", id));
                 return new WorkerCreated(id, password);
             });
-        }
     }
 
     public void deleteAccount(long id, PasswordConfirmation request) {
-        synchronized (credentialLock) {
             transactions.executeWithoutResult(status -> {
-                WorkerProfile profile = activeProfile(id);
-                Account account = profile.getAccount();
+                Account account = accounts.findByIdForUpdate(id)
+                        .filter(a -> a.getRole() == Role.WORKER && a.isEnabled() && a.getDeletedAt() == null)
+                        .orElseThrow(ApiException::unauthorized);
                 if (!matchesPassword(request.currentPassword(), account.getPasswordHash())) throw ApiException.unauthorized();
+                WorkerProfile profile = workers.findById(id).orElseThrow(() -> ApiException.notFound("WORKER_NOT_FOUND", "작업자 정보를 찾을 수 없습니다."));
                 Instant time = now();
                 account.setEnabled(false); account.setDeletedAt(time); account.setUpdatedAt(time);
                 account.setPasswordHash(encoder.encode(randomString(32)));
                 profile.setWorkerName("탈퇴한 작업자"); profile.setSex(null); profile.setAge(null);
                 tokens.revokeAll(id, time);
+                eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-deleted", id));
             });
-        }
     }
 
     @Transactional
@@ -185,7 +206,9 @@ public class SafetyService {
         SafetyEvent event = new SafetyEvent();
         event.setWorker(activeProfile(id)); event.setOccurredAt(Instant.ofEpochMilli(request.time().toEpochMilli())); event.setReceivedAt(now());
         event.setEventType(request.eventType()); event.setAlertSender(request.alertSender().trim());
-        return eventInfo(events.saveAndFlush(event));
+        SafetyEvent saved = events.saveAndFlush(event);
+        eventPublisher.publishEvent(AdminDataChangedEvent.event("event-created", saved.getId(), id));
+        return eventInfo(saved);
     }
 
     @Transactional(readOnly = true)
@@ -210,10 +233,11 @@ public class SafetyService {
         String normalizedMemo = memo.trim();
         if (normalizedMemo.isEmpty() || normalizedMemo.length() > 500)
             throw ApiException.badRequest("처리 메모는 공백을 제외하고 1~500자여야 합니다.");
+        SafetyEvent current = findEvent(id);
         if (events.process(id, admin, now(), normalizedMemo) == 0) {
-            findEvent(id);
             throw ApiException.conflict("EVENT_ALREADY_PROCESSED", "이미 처리된 이벤트입니다.");
         }
+        eventPublisher.publishEvent(AdminDataChangedEvent.event("event-processed", id, current.getWorker().getId()));
         return eventInfo(findEvent(id));
     }
 
@@ -244,7 +268,7 @@ public class SafetyService {
         if (id <= 0) throw ApiException.badRequest("이벤트 ID를 확인하세요.");
         return events.findById(id).orElseThrow(() -> ApiException.notFound("EVENT_NOT_FOUND", "이벤트를 찾을 수 없습니다."));
     }
-    private WorkerInfo workerInfo(WorkerProfile p) { return new WorkerInfo(p.getId(), p.getWorkerName(), p.getSex(), p.getAge(), p.getAccount().isEnabled()); }
+    private WorkerInfo workerInfo(WorkerProfile p) { return new WorkerInfo(p.getId(), p.getWorkerName(), p.getSex(), p.getAge(), p.getAccount().isEnabled(), p.getAccount().getLoginLockedAt() != null, p.getAccount().getDeletedAt() != null); }
     private EventInfo eventInfo(SafetyEvent e) { return new EventInfo(e.getId(), e.getWorker().getId(), e.getWorker().getWorkerName(), e.getOccurredAt(), e.getReceivedAt(), e.getEventType(), e.getAlertSender(), e.getProcessedAt(), e.getProcessedBy() == null ? null : e.getProcessedBy().getId(), e.getAdminMemo()); }
     private Pageable pageable(int page, int size, Sort sort) {
         if (page < 0 || size < 1 || size > 100) throw ApiException.badRequest("페이지 값을 확인하세요.");

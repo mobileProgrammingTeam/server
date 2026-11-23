@@ -5,7 +5,7 @@
 - Java 17, Maven, Spring Boot, Spring Security, Thymeleaf, Spring Data JPA, PostgreSQL
 - 근로자 계정 생성, 로그인, 프로필 관리, 안전 이벤트 보고 및 관리자 콘솔 제공
 
-## Docker로 실행
+## 로컬 Docker 실행
 
 Docker와 Docker Compose를 설치하고 Docker를 실행합니다. 프로젝트 루트에 `.env` 파일이 없다면 예제 파일을 복사합니다.
 
@@ -39,6 +39,31 @@ docker compose logs -f server
 ```powershell
 docker compose down
 ```
+
+## GCP Compute Engine에서 실행
+
+Linux VM 1대에 Git, Docker Engine, Docker Compose 플러그인을 준비하고 저장소를 클론합니다. 승인된 릴리스 태그로 체크아웃한 뒤 `.env`를 만들고 운영 비밀값을 설정합니다.
+
+```bash
+git clone https://github.com/mobileProgrammingTeam/server.git
+cd server
+git checkout v1.0.0
+cp .env.example .env
+chmod 600 .env
+```
+
+`.env`에서 `POSTGRES_PASSWORD`, `ADMIN_LOGIN_ID`, `ADMIN_INITIAL_PASSWORD`를 안전한 값으로 설정하고 `SPRING_PROFILES_ACTIVE=prod`로 지정합니다. 날씨 조회를 쓸 때는 현장의 위도와 경도를 설정합니다. `.env`를 저장소에 커밋하거나 로그에 출력하지 않습니다.
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 server
+curl --fail http://127.0.0.1:8081/health
+```
+
+Compose는 DB 포트만 VM의 loopback에 공개하고 서버는 VM 인터페이스의 8081 포트에 공개합니다. VM 방화벽과 GCP 방화벽은 필요한 외부 HTTPS 프록시만 허용하도록 구성합니다. 직접 인터넷에 공개하는 경우 8081 포트는 외부에 열지 말고 TLS 프록시 뒤에 둡니다. 관리자 로그인과 세션을 사용하는 관리 화면은 HTTPS 접속이 필요합니다. SSE 프록시는 응답 버퍼링을 끄고 연결 유지 시간을 25초 heartbeat보다 길게 설정합니다. VM 한 대에서 서버 하나만 실행합니다.
+
+서버를 갱신할 때 새 태그를 체크아웃하고 같은 Compose 명령으로 다시 빌드합니다. `docker compose down`은 DB 볼륨을 유지합니다. `docker compose down -v`는 운영 데이터를 삭제하므로 사용하지 않습니다. 이전 이미지로 롤백하기 전에 새 스키마와 호환되는지 확인하고, DB 복원은 백업과 복원 범위를 확인한 뒤 수행합니다.
 
 ## API
 

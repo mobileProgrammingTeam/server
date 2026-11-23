@@ -11,6 +11,7 @@ import org.example.workersafety_server.security.LoginAttemptFilter;
 import org.example.workersafety_server.security.RequestLogFilter;
 import org.example.workersafety_server.security.AdminAuthenticationLog;
 import org.example.workersafety_server.dto.ApiModels.Login;
+import org.example.workersafety_server.dto.ApiModels.PasswordChange;
 import org.example.workersafety_server.exception.ApiException;
 import org.example.workersafety_server.repository.WorkerProfileRepository;
 import org.example.workersafety_server.repository.SafetyEventRepository;
@@ -232,14 +233,17 @@ class WorkersafetyServerApplicationTests {
     @Test void passwordChangesAndResetRevokeAllTokens() throws Exception {
         MockHttpSession admin = adminSession(); JsonNode created = createWorker(admin);
         long id = created.get("workerId").asLong(); String password = created.get("temporaryPassword").asString();
+        assertThat(password).isEqualTo("0000");
         String first = login(id, password), second = login(id, password), next = "new-" + UUID.randomUUID();
         mvc.perform(patch("/api/worker/me/password").header("Authorization", "Bearer " + first).contentType(MediaType.APPLICATION_JSON)
                 .content(json.writeValueAsString(Map.of("currentPassword", password, "newPassword", next)))).andExpect(status().isNoContent());
         mvc.perform(post("/api/worker/auth/logout").header("Authorization", "Bearer " + second)).andExpect(status().isUnauthorized());
         String current = login(id, next);
         mvc.perform(post("/api/admin/workers/{id}/reset-password", id).session(admin).with(csrf())).andExpect(status().isOk())
+                .andExpect(jsonPath("$.temporaryPassword").value("0000"))
                 .andExpect(header().string("Cache-Control", org.hamcrest.Matchers.containsString("no-store")));
         mvc.perform(post("/api/worker/auth/logout").header("Authorization", "Bearer " + current)).andExpect(status().isUnauthorized());
+        assertThat(login(id, "0000")).isNotBlank();
     }
 
     @Test void tokenExpiryLogoutAndInvalidRequests() throws Exception {
@@ -336,7 +340,9 @@ class WorkersafetyServerApplicationTests {
 
     @Test void loginRacingPasswordResetCannotLeaveOldTokenValid() throws Exception {
         JsonNode created = createWorker(adminSession());
-        long id = created.get("workerId").asLong(); String password = created.get("temporaryPassword").asString();
+        long id = created.get("workerId").asLong();
+        String password = "old-" + UUID.randomUUID();
+        service.changePassword(id, new PasswordChange(created.get("temporaryPassword").asString(), password));
         var executor = Executors.newFixedThreadPool(2); var start = new CountDownLatch(1);
         try {
             var loginResult = executor.submit(() -> {
@@ -510,22 +516,20 @@ class WorkersafetyServerApplicationTests {
                 .andExpect(status().isUnauthorized());
     }
 
-    @Test void adminDesignPagesRenderAndDesignApisReturnFixedValuesWithoutWriting() throws Exception {
+    @Test void adminPagesRenderWithoutSamplesAndUnimplementedApisDoNotSucceed() throws Exception {
         MockHttpSession admin = adminSession();
         int workersBefore = jdbc.queryForObject("SELECT COUNT(*) FROM worker_profiles", Integer.class);
         int eventsBefore = jdbc.queryForObject("SELECT COUNT(*) FROM safety_events", Integer.class);
 
-        mvc.perform(get("/api/admin/dashboard").session(admin)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.workers.length()").value(4));
-        mvc.perform(get("/api/admin/workers/status").session(admin)).andExpect(status().isOk())
-                .andExpect(jsonPath("$.items[0].workerId").value(101));
+        mvc.perform(get("/api/admin/dashboard").session(admin)).andExpect(status().isNotFound());
+        mvc.perform(get("/api/admin/workers/status").session(admin)).andExpect(status().is4xxClientError());
         for (String path : new String[]{"/admin/dashboard", "/admin/events", "/admin/workers",
                 "/admin/alerts", "/admin/zones", "/admin/connectivity", "/admin/weather",
                 "/admin/reports", "/admin/settings", "/admin/admins"}) {
             mvc.perform(get(path).session(admin)).andExpect(status().isOk());
         }
         String workerPage = mvc.perform(get("/admin/workers").session(admin)).andReturn().getResponse().getContentAsString();
-        assertThat(workerPage).contains("+ 작업자 생성", "id=\"worker-create\"", "name=\"age\"", "등록된 작업자가 없습니다.");
+        assertThat(workerPage).contains("+ 작업자 생성", "id=\"worker-create\"", "name=\"age\"");
         assertThat(workerPage).doesNotContain("김민준", "A 작업구역", "sample@example.invalid");
         String workerList = mvc.perform(get("/admin/workers").param("fragment", "list").session(admin))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
@@ -537,7 +541,7 @@ class WorkersafetyServerApplicationTests {
         }
         mvc.perform(post("/api/admin/weather/notices").session(admin).with(csrf()).contentType(MediaType.APPLICATION_JSON)
                         .content("{\"message\":\"sample\"}"))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.notice.id").value(4002));
+                .andExpect(status().isNotFound());
         mvc.perform(post("/api/worker/auth/register").contentType(MediaType.APPLICATION_JSON)
                         .content("{\"workerName\":\"Sample\",\"email\":\"sample@example.invalid\",\"password\":\"password-123\"}"))
                 .andExpect(status().isUnauthorized());

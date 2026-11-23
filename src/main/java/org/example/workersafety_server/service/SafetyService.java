@@ -133,7 +133,11 @@ public class SafetyService {
     public WorkerInfo updateProfile(long id, Map<String, Object> changes) {
         if (changes.isEmpty() || !Set.of("workerName", "sex", "age").containsAll(changes.keySet()) || changes.containsValue(null))
             throw ApiException.badRequest("수정할 개인정보를 확인하세요.");
-        WorkerProfile profile = activeProfile(id);
+        Account account = accounts.findByIdForUpdate(id)
+                .filter(a -> a.getRole() == Role.WORKER && a.isEnabled() && a.getDeletedAt() == null)
+                .orElseThrow(() -> ApiException.notFound("WORKER_NOT_FOUND", "작업자 정보를 찾을 수 없습니다."));
+        WorkerProfile profile = workers.findById(id)
+                .orElseThrow(() -> ApiException.notFound("WORKER_NOT_FOUND", "작업자 정보를 찾을 수 없습니다."));
         boolean changed = false;
         if (changes.containsKey("workerName")) {
             Object value = changes.get("workerName");
@@ -154,7 +158,7 @@ public class SafetyService {
             changed |= !age.equals(profile.getAge());
             profile.setAge(age);
         }
-        profile.getAccount().setUpdatedAt(now());
+        account.setUpdatedAt(now());
         if (changed) eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-updated", id));
         return workerInfo(profile);
     }

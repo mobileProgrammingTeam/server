@@ -39,8 +39,9 @@ public class LoginAttemptFilter extends OncePerRequestFilter {
         String ip = normalizedIp(request.getRemoteAddr());
         long now = clock.millis();
         long retry = tx.execute(status -> {
-            jdbc.update("INSERT INTO login_ip_blocks(ip_address, blocked_until) VALUES (?, 0) ON CONFLICT (ip_address) DO NOTHING", ip);
-            Long blockedUntil = jdbc.queryForObject("SELECT blocked_until FROM login_ip_blocks WHERE ip_address = ? FOR UPDATE", Long.class, ip);
+            Long blockedUntil = jdbc.queryForObject("INSERT INTO login_ip_blocks(ip_address, blocked_until) VALUES (?, 0) " +
+                    "ON CONFLICT (ip_address) DO UPDATE SET blocked_until = login_ip_blocks.blocked_until " +
+                    "RETURNING blocked_until", Long.class, ip);
             if (blockedUntil != null && blockedUntil > now) return (blockedUntil - now + 999) / 1000;
             jdbc.update("UPDATE login_ip_blocks SET blocked_until = 0 WHERE ip_address = ? AND blocked_until <> 0", ip);
             jdbc.update("DELETE FROM login_ip_attempts WHERE ip_address = ? AND attempted_at <= ?", ip, now - WINDOW_MILLIS);

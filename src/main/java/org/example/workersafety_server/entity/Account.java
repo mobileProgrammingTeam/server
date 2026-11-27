@@ -16,4 +16,6 @@ public class Account {
     @Column(name = "created_at", nullable = false) private Instant createdAt;
     @Column(name = "updated_at", nullable = false) private Instant updatedAt;
     @Column(name = "deleted_at") private Instant deletedAt;
+    @Column(name = "failed_login_count", nullable = false) private int failedLoginCount;
+    @Column(name = "login_locked_at") private Instant loginLockedAt;
 }

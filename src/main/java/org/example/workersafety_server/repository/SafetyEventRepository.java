@@ -12,6 +12,10 @@ import java.time.Instant;
 public interface SafetyEventRepository extends JpaRepository<SafetyEvent, Long>, JpaSpecificationExecutor<SafetyEvent> {
     long countByProcessedAtIsNull();
 
+    java.util.Optional<SafetyEvent> findFirstByWorker_IdAndEventTypeAndAlertSenderAndOccurredAtOrderByIdAsc(
+            long workerId, org.example.workersafety_server.entity.EventType eventType,
+            String alertSender, Instant occurredAt);
+
     @Modifying(clearAutomatically = true, flushAutomatically = true)
     @Query("update SafetyEvent e set e.processedAt = :now, e.processedBy = :admin, e.adminMemo = :memo where e.id = :id and e.processedAt is null")
     int process(@Param("id") long id, @Param("admin") Account admin,

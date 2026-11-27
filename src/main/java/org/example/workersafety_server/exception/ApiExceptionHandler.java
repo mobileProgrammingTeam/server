@@ -24,12 +24,12 @@ public class ApiExceptionHandler {
     @ExceptionHandler(DataAccessException.class)
     ResponseEntity<ErrorResponse> database(DataAccessException ex) {
         if (DatabaseErrors.isBusy(ex)) return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(new ErrorResponse("DATABASE_BUSY", "데이터베이스가 사용 중입니다."));
-        log.error("Database operation failed", ex);
+        log.error("Database operation failed");
         return ResponseEntity.internalServerError().body(new ErrorResponse("INTERNAL_ERROR", "요청을 처리하지 못했습니다."));
     }
     @ExceptionHandler(Exception.class)
     ResponseEntity<ErrorResponse> unexpected(Exception ex) {
-        log.error("Request processing failed", ex);
+        log.error("Request processing failed");
         return ResponseEntity.internalServerError().body(new ErrorResponse("INTERNAL_ERROR", "요청을 처리하지 못했습니다."));
     }
 }

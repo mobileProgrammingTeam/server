@@ -7,7 +7,7 @@
   <div class="workspace">
     <header th:replace="~{admin/fragments :: topbar}"></header>
     <p id="notice" role="status" aria-live="polite"></p>
-    <main id="workers-page">
+    <main id="workers-page" data-live-page="workers">
       <div class="page-heading"><div><p class="eyebrow">WORKER MANAGEMENT</p><h1>작업자</h1><p class="muted">작업자 계정과 등록 정보를 관리합니다.</p></div></div>
       <section class="surface panel" id="worker-create">
         <div class="surface-head"><div><h2>작업자 계정 생성</h2><p>생성 후 임시 비밀번호를 작업자에게 안전하게 전달하세요.</p></div></div>
@@ -22,15 +22,15 @@
       </section>
       <section id="worker-list" class="surface panel" th:fragment="workerList" th:attr="data-page=${page}">
         <div class="surface-head"><div><h2>등록 작업자</h2><p th:text="|전체 ${workersPage.totalElements}명|">전체 0명</p></div></div>
-        <div class="table-wrap"><table><thead><tr><th>ID</th><th>이름</th><th>성별</th><th>나이</th><th>계정</th><th>안전 상태</th><th>구역</th><th>심박동</th><th>산소포화도</th><th>마지막 통신</th><th>관리</th></tr></thead>
+        <div class="table-wrap"><table><thead><tr><th>ID</th><th>이름</th><th>성별</th><th>나이</th><th>계정</th><th>감시 실행 상태</th><th>안전 상태</th><th>구역</th><th>심박 상태 · 이벤트</th><th>워치 마지막 수신</th><th>마지막 통신</th><th>관리</th></tr></thead>
           <tbody><tr th:each="worker : ${workersPage.items}" th:attr="data-worker-id=${worker.workerId}">
             <td th:text="${worker.workerId}">-</td><td><a th:href="@{/admin/workers/{id}(id=${worker.workerId})}" th:text="${worker.workerName}">작업자</a></td>
             <td th:text="${worker.sex == null ? '-' : worker.sex}">-</td><td th:text="${worker.age == null ? '-' : worker.age}">-</td>
-            <td th:text="${worker.enabled ? '활성' : '탈퇴'}">-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+            <td th:text="${worker.deleted ? '탈퇴' : (worker.loginLocked ? '로그인 잠금' : (worker.enabled ? '활성' : '비활성'))}">-</td><td th:text="${worker.monitoringStatus == null ? '미수신' : (worker.monitoringStatus.name() == 'RUNNING' ? '실행 중' : '중지')}">미수신</td><td>-</td><td>-</td><td><span th:text="${worker.heartRateDataStatus == 'NOT_RECEIVED' ? '미수신' : (worker.heartRateDataStatus == 'STALE' ? '만료' : (worker.heartRateStatus.name() == 'DANGER' ? '위험' : '정상'))}">미수신</span><small th:if="${worker.measuredAt != null}" th:attr="data-time=${worker.measuredAt}" th:text="${worker.measuredAt}"></small><a th:href="@{/admin/events(workerId=${worker.workerId},eventType='ABNORMAL_VITAL')}">이벤트 확인</a></td><td th:attr="data-time=${worker.watchLastSeenAt}" th:text="${worker.watchLastSeenAt == null ? '-' : worker.watchLastSeenAt}">-</td><td th:attr="data-time=${worker.lastSeenAt}" th:text="${worker.lastSeenAt == null ? '-' : worker.lastSeenAt}">-</td>
             <td><button type="button" class="reset-password" th:if="${worker.enabled}" th:attr="data-worker-id=${worker.workerId}">비밀번호 초기화</button>
               <!-- Added administrator deletion action for active workers. -->
               <button type="button" class="delete-worker" th:if="${worker.enabled}" th:attr="data-worker-id=${worker.workerId}">삭제</button></td>
-          </tr><tr th:if="${workersPage.items.empty}"><td class="empty" colspan="11">등록된 작업자가 없습니다. 위에서 작업자 계정을 생성하세요.</td></tr></tbody>
+          </tr><tr th:if="${workersPage.items.empty}"><td class="empty" colspan="12">등록된 작업자가 없습니다. 위에서 작업자 계정을 생성하세요.</td></tr></tbody>
         </table></div>
         <div class="pagination"><a class="button-link" th:if="${page > 0}" th:href="@{/admin/workers(page=${page - 1})}">이전</a><span th:text="|${page + 1} / ${T(java.lang.Math).max(workersPage.totalPages, 1)} 페이지|">1 페이지</span><a class="button-link" th:if="${page + 1 < workersPage.totalPages}" th:href="@{/admin/workers(page=${page + 1})}">다음</a></div>
       </section>

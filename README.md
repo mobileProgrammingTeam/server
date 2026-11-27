@@ -1,77 +1,111 @@
-# Worker Safety Server
+﻿# 근로자 안전 관리 서버
 
-작업자 안전 이벤트를 저장·조회·처리하는 서버입니다. Android 앱용 REST API와 관리자 웹을 제공합니다.
+근로자 안전 이벤트, 근로자 계정, 관리자 기능을 제공하는 REST API 서버입니다.
 
-- Java 17 · Maven · Spring Boot · Spring Security · Thymeleaf · JPA · PostgreSQL
-- 작업자 계정 생성, 로그인, 프로필 관리, 안전 이벤트 등록 및 처리 지원
-- 미구현 도메인 API는 고정 응답을 반환하며, 관리자 화면은 실제 데이터 또는 빈 상태를 표시
+- Java 17, Maven, Spring Boot, Spring Security, Thymeleaf, Spring Data JPA, PostgreSQL
+- 근로자 계정 생성, 로그인, 프로필 관리, 안전 이벤트 보고 및 관리자 콘솔 제공
 
-## 로컬 실행
+## 로컬 Docker 실행
 
-JDK 17을 설치하고 프로젝트 루트에서 실행합니다.
-
-1. `.env.example`을 `.env`로 복사합니다.
-2. `ADMIN_LOGIN_ID`, `ADMIN_INITIAL_PASSWORD`에 최초 관리자 정보를 입력합니다.
-3. 서버를 실행합니다.
+Docker와 Docker Compose를 설치하고 Docker를 실행합니다. 프로젝트 루트에 `.env` 파일이 없다면 예제 파일을 복사합니다.
 
 ```powershell
-.\mvnw.cmd spring-boot:run
+Copy-Item .env.example .env
 ```
 
-macOS/Linux에서는 `./mvnw spring-boot:run`을 사용합니다. IntelliJ에서는 Working directory를 프로젝트 루트로 설정합니다.
+`.env`에서 다음 값을 설정합니다.
 
-- 관리자 로그인: http://localhost:8080/admin/login
-- 상태 확인: http://localhost:8080/health
+- `POSTGRES_PASSWORD`: 사용할 데이터베이스 비밀번호로 변경합니다.
+- `ADMIN_LOGIN_ID`, `ADMIN_INITIAL_PASSWORD`: 초기 관리자 계정을 설정합니다.
+- `SPRING_PROFILES_ACTIVE=local`: 로컬 HTTP 접속에 사용합니다. `.env.example`의 기본값입니다.
+- `DOCKER_SERVER_PORT=8081`: 서버에 접속할 호스트 포트입니다.
 
-## 설정
+다음 명령어로 서버 이미지를 빌드하고 PostgreSQL과 서버를 백그라운드에서 실행합니다. JDK와 Maven은 Docker 이미지 내부에서 사용하므로 별도로 설치할 필요가 없습니다.
 
-| 환경변수 | 용도 | 기본값 |
-| --- | --- | --- |
-| `ADMIN_LOGIN_ID` | 최초 관리자 ID | 관리자 계정이 없을 때 필수 |
-| `ADMIN_INITIAL_PASSWORD` | 최초 관리자 비밀번호 | 관리자 계정이 없을 때 필수 |
-| `SPRING_DATASOURCE_URL` | Shared PostgreSQL connection | IntelliJ `localhost:5432`, Docker `database:5432` |
-| `SERVER_PORT` | IntelliJ application port | `8080` |
-| `DOCKER_SERVER_PORT` | Docker application port on the host | `8081` |
-| `MOBILE_TOKEN_TTL` | 작업자 토큰 유효 기간 | `PT12H` |
-| `SPRING_PROFILES_ACTIVE` | 실행 프로필 | 로컬 `local`, Compose 미지정 시 `prod` |
+```powershell
+docker compose up -d --build
+```
 
-최초 관리자 비밀번호는 12~64자, UTF-8 72바이트 이하여야 합니다. 기존 관리자 계정은 초기 설정으로 덮어쓰지 않습니다.
+기본 설정에서 관리자 콘솔은 `http://localhost:8081/admin/login`, 서버 상태 확인 주소는 `http://localhost:8081/health`입니다. `DOCKER_SERVER_PORT`를 변경했다면 해당 포트로 접속합니다.
 
-`local` 프로필은 `.env`를 UTF-8 Java Properties로 읽습니다. `KEY=value` 형식으로 작성하고 따옴표나 `export`를 붙이지 마세요. Windows 경로에는 `/`를 사용하세요. OS 환경변수는 파일보다 우선하며, 설정 변경 후에는 서버를 재시작합니다. `.env`와 비밀값은 Git에 저장하지 마세요.
+서버 로그를 확인하려면 다음 명령어를 실행합니다.
+
+```powershell
+docker compose logs -f server
+```
+
+종료할 때는 다음 명령어를 실행합니다. 데이터베이스 데이터는 `postgres-data` 볼륨에 유지됩니다.
+
+```powershell
+docker compose down
+```
+
+## GCP Compute Engine에서 실행
+
+Linux VM 1대에 Git, Docker Engine, Docker Compose 플러그인을 준비하고 저장소를 클론합니다. 승인된 릴리스 태그로 체크아웃한 뒤 `.env`를 만들고 운영 비밀값을 설정합니다.
+
+```bash
+git clone https://github.com/mobileProgrammingTeam/server.git
+cd server
+git checkout v1.0.0
+cp .env.example .env
+chmod 600 .env
+```
+
+`.env`에서 `POSTGRES_PASSWORD`, `ADMIN_LOGIN_ID`, `ADMIN_INITIAL_PASSWORD`를 안전한 값으로 설정하고 `SPRING_PROFILES_ACTIVE=prod`로 지정합니다. 날씨 조회를 쓸 때는 현장의 위도와 경도를 설정합니다. `.env`를 저장소에 커밋하거나 로그에 출력하지 않습니다.
+
+```bash
+docker compose up -d --build
+docker compose ps
+docker compose logs --tail=100 server
+curl --fail http://127.0.0.1:8081/health
+```
+
+Compose는 DB 포트만 VM의 loopback에 공개하고 서버는 VM 인터페이스의 8081 포트에 공개합니다. VM 방화벽과 GCP 방화벽은 필요한 외부 HTTPS 프록시만 허용하도록 구성합니다. 직접 인터넷에 공개하는 경우 8081 포트는 외부에 열지 말고 TLS 프록시 뒤에 둡니다. 관리자 로그인과 세션을 사용하는 관리 화면은 HTTPS 접속이 필요합니다. SSE 프록시는 응답 버퍼링을 끄고 연결 유지 시간을 25초 heartbeat보다 길게 설정합니다. VM 한 대에서 서버 하나만 실행합니다.
+
+서버를 갱신할 때 새 태그를 체크아웃하고 같은 Compose 명령으로 다시 빌드합니다. `docker compose down`은 DB 볼륨을 유지합니다. `docker compose down -v`는 운영 데이터를 삭제하므로 사용하지 않습니다. 이전 이미지로 롤백하기 전에 새 스키마와 호환되는지 확인하고, DB 복원은 백업과 복원 범위를 확인한 뒤 수행합니다.
 
 ## API
 
-작업자는 `/api/worker/auth/login`으로 로그인한 뒤 `Authorization: Bearer <accessToken>`을 사용합니다. 관리자 API는 웹 로그인 세션과 쓰기 요청의 CSRF 토큰이 필요합니다.
+근로자는 `POST /api/worker/auth/login`으로 로그인합니다. 근로자 API를 호출할 때는 반환된 토큰을 `Authorization: Bearer <accessToken>` 헤더에 담아 전송합니다. 관리자 API는 관리자 로그인 세션과 CSRF 토큰을 사용합니다.
 
-- [작업자 API](src/main/java/org/example/workersafety_server/controller/api/WorkerController.java): 인증, 이벤트 등록, 프로필·비밀번호 변경, 탈퇴
-- [관리자 API](src/main/java/org/example/workersafety_server/controller/api/AdminApiController.java): 작업자 생성·조회·비밀번호 초기화, 이벤트 조회·처리
-- [DB schema](src/main/resources/schema-postgresql.sql)
+### 로그인한 근로자 프로필 조회
+
+`GET /api/worker/me`는 Bearer 토큰으로 식별된 근로자의 프로필을 반환합니다. 근로자 ID를 매개변수로 받지 않습니다. 인증되지 않았거나 토큰이 만료, 폐기 또는 그 밖의 사유로 유효하지 않은 경우 HTTP 401을 반환합니다. 응답에는 `Cache-Control: no-store` 헤더가 적용됩니다.
+
+요청 예시:
+
+```http
+GET /api/worker/me
+Authorization: Bearer <accessToken>
+```
+
+응답 예시 (`200 OK`):
+
+```json
+{
+  "workerId": 1024,
+  "workerName": "홍길동",
+  "sex": "M",
+  "age": 25,
+  "enabled": true,
+  "loginLocked": false,
+  "deleted": false
+}
+```
+
+`workerId`는 숫자, `workerName`은 문자열, `sex`는 문자열(`M`, `F`, `U`) 또는 `null`, `age`는 숫자 또는 `null`입니다. `enabled`, `loginLocked`, `deleted`는 불리언 값입니다. 응답은 기존 `WorkerInfo` DTO를 사용하며, 프로필 필드와 함께 계정 상태 필드를 포함합니다.
+
+그 밖의 API 오류는 기존 `{ "code": "...", "message": "..." }` 응답 형식을 사용합니다. `PATCH /api/worker/me`는 로그인한 근로자의 프로필을 수정하며, GET 엔드포인트는 저장된 값을 반환합니다.
+
+- [근로자 API](src/main/java/org/example/workersafety_server/controller/api/WorkerController.java)
+- [관리자 API](src/main/java/org/example/workersafety_server/controller/api/AdminApiController.java)
+- [데이터베이스 스키마](src/main/resources/schema-postgresql.sql)
 
 ## 테스트
+
+테스트는 Testcontainers를 통해 임시 PostgreSQL 데이터베이스를 사용합니다. 다음 명령어로 실행합니다.
 
 ```powershell
 .\mvnw.cmd clean verify
 ```
-
-테스트는 임시 PostgreSQL database를 사용합니다. 실행 중인 개발·테스트 서버의 API는 다음 도구로 확인할 수 있습니다.
-
-```powershell
-python -m pip install httpx
-python tools/api_tester.py
-```
-
-API 테스터는 서버 주소와 관리자 정보를 입력받습니다. 테스트 작업자를 생성한 뒤 탈퇴시키며, 계정과 이벤트 이력은 DB에 남습니다.
-
-## Docker
-
-Docker and the IntelliJ local profile both connect to the same PostgreSQL database. Start the database before running the application from IntelliJ:
-
-```powershell
-docker compose up -d database
-```
-
-Run the Docker application at `http://localhost:8081` with `docker compose up --build -d`. The IntelliJ application uses `http://localhost:8080`. Both show the same data.
-
-PostgreSQL data is stored in the `postgres-data` Docker volume. `docker compose down -v` deletes it.
-
-See [shared database setup](docs/shared-database.md) for run instructions.

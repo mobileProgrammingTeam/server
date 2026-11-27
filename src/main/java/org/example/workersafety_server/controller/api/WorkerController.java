@@ -31,8 +31,20 @@ public class WorkerController {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.createEvent(id(authentication), request));
     }
 
+    @PostMapping("/me/status")
+    public ResponseEntity<WorkerStatusResult> status(Authentication authentication,
+                                                    @Valid @RequestBody WorkerStatusReport request) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(service.reportWorkerStatus(id(authentication), request));
+    }
+
     @PatchMapping("/me")
     public WorkerInfo update(Authentication authentication, @RequestBody Map<String, Object> changes) { return service.updateProfile(id(authentication), changes); }
+
+    @GetMapping("/me")
+    public ResponseEntity<WorkerInfo> getProfile(Authentication authentication) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.worker(id(authentication)));
+    }
 
     @PatchMapping("/me/password")
     public ResponseEntity<Void> password(Authentication authentication, @Valid @RequestBody PasswordChange request) {

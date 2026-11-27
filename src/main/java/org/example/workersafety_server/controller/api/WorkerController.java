@@ -31,6 +31,13 @@ public class WorkerController {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.createEvent(id(authentication), request));
     }
 
+    @PostMapping("/me/status")
+    public ResponseEntity<WorkerStatusResult> status(Authentication authentication,
+                                                    @Valid @RequestBody WorkerStatusReport request) {
+        return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+                .body(service.reportWorkerStatus(id(authentication), request));
+    }
+
     @PatchMapping("/me")
     public WorkerInfo update(Authentication authentication, @RequestBody Map<String, Object> changes) { return service.updateProfile(id(authentication), changes); }
 

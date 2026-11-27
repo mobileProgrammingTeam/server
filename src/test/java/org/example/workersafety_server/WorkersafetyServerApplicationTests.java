@@ -549,6 +549,178 @@ class WorkersafetyServerApplicationTests {
         assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM safety_events", Integer.class)).isEqualTo(eventsBefore);
     }
 
+    @Test void monitoringReportsNeverCreateHeartEventsAndRejectStaleUpdates() throws Exception {
+        MockHttpSession admin = adminSession();
+        JsonNode created = createWorker(admin);
+        long id = created.get("workerId").asLong();
+        String token = login(id, created.get("temporaryPassword").asString());
+        mvc.perform(post("/api/worker/me/status").contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("monitoringStatus", "RUNNING",
+                        "reportedAt", "2026-01-01T00:00:00Z")))).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/worker/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.monitoringStatus").isEmpty());
+        var body = Map.of("monitoringStatus", "RUNNING", "reportedAt", "2026-01-01T00:00:10Z",
+                "devices", java.util.List.of(Map.of("type", "워치", "lastSeenAt", "2026-01-01T00:00:09Z")));
+        mvc.perform(post("/api/worker/me/status").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.monitoringStatus").value("RUNNING"))
+                .andExpect(jsonPath("$.watchLastSeenAt").value("2026-01-01T00:00:09Z"))
+                .andExpect(jsonPath("$.lastSeenAt").isNotEmpty());
+        mvc.perform(post("/api/worker/me/status").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)))
+                .andExpect(status().isOk());
+        reportMonitoring(token, "STOPPED", "2026-01-01T00:00:09Z").andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("WORKER_STATUS_OUT_OF_ORDER"));
+        reportMonitoring(token, "STOPPED", "2026-01-01T00:00:10Z").andExpect(status().isConflict());
+        reportMonitoring(token, "DANGER", "2026-01-01T00:00:11Z").andExpect(status().isBadRequest());
+        reportMonitoring(token, "RUNNING", "2999-01-01T00:00:00Z").andExpect(status().isBadRequest());
+        mvc.perform(post("/api/worker/me/status").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("monitoringStatus", "RUNNING"))))
+                .andExpect(status().isBadRequest());
+        mvc.perform(post("/api/worker/me/status").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(
+                        Map.of("monitoringStatus", "RUNNING", "reportedAt", "2026-01-01T00:00:11Z",
+                                "devices", java.util.List.of(Map.of("type", "워치", "lastSeenAt", "2999-01-01T00:00:00Z"))))))
+                .andExpect(status().isBadRequest());
+        mvc.perform(get("/api/admin/events").session(admin).param("workerId", Long.toString(id)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(0));
+        mvc.perform(get("/admin/workers/" + id).session(admin))
+                .andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("실행 중")));
+        reportMonitoring(token, "STOPPED", "2026-01-01T00:00:12Z").andExpect(status().isOk());
+        mvc.perform(get("/api/worker/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.monitoringStatus").value("STOPPED"))
+                .andExpect(jsonPath("$.watchLastSeenAt").value("2026-01-01T00:00:09Z"));
+        JsonNode another = createWorker(admin);
+        mvc.perform(get("/api/admin/workers/" + another.get("workerId").asLong()).session(admin))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.monitoringStatus").isEmpty());
+        mvc.perform(post("/api/worker/me/heart-rate-status").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("status", "DANGER", "assessedAt", "2026-01-01T00:00:10Z"))))
+                .andExpect(status().is4xxClientError());
+    }
+
+    @Test void heartRiskUsesExistingEventApiAndExactRetriesKeepSameIncident() throws Exception {
+        MockHttpSession admin = adminSession();
+        JsonNode created = createWorker(admin);
+        long id = created.get("workerId").asLong();
+        String token = login(id, created.get("temporaryPassword").asString());
+        reportMonitoring(token, "RUNNING", "2026-01-01T00:00:00Z").andExpect(status().isOk());
+        var body = new org.example.workersafety_server.dto.ApiModels.NewEvent(
+                Instant.parse("2026-01-01T00:00:01Z"),
+                org.example.workersafety_server.entity.EventType.ABNORMAL_VITAL, "ANDROID_HEART_RATE");
+        String first = mvc.perform(post("/api/worker/events").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        long eventId = json.readTree(first).get("eventId").asLong();
+        mvc.perform(post("/api/worker/events").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.eventId").value(eventId));
+        reportMonitoring(token, "STOPPED", "2026-01-01T00:00:02Z").andExpect(status().isOk());
+        mvc.perform(get("/api/admin/events").session(admin).param("workerId", Long.toString(id))
+                .param("processed", "false")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.totalElements").value(1));
+        mvc.perform(get("/admin/alerts").session(admin).param("fragment", "list"))
+                .andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("심박수 위험")));
+        mvc.perform(patch("/api/admin/events/" + eventId + "/process").session(admin).with(csrf())
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(Map.of("adminMemo", "현장 확인"))))
+                .andExpect(status().isOk());
+        mvc.perform(post("/api/worker/events").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(body)))
+                .andExpect(status().isCreated()).andExpect(jsonPath("$.eventId").value(eventId))
+                .andExpect(jsonPath("$.processedAt").isNotEmpty());
+        mvc.perform(get("/api/worker/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.monitoringStatus").value("STOPPED"));
+        mvc.perform(post("/api/worker/events").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(
+                        Map.of("time", "2026-01-01T00:00:03Z", "eventType", "ABNORMAL_VITAL", "alertSender", "ANDROID_HEART_RATE"))))
+                .andExpect(status().isCreated());
+        mvc.perform(get("/api/admin/events").session(admin).param("workerId", Long.toString(id)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2));
+    }
+
+    @Test void concurrentHeartRiskRetriesReturnOneEvent() throws Exception {
+        MockHttpSession admin = adminSession();
+        long id = createWorker(admin).get("workerId").asLong();
+        var request = new org.example.workersafety_server.dto.ApiModels.NewEvent(
+                Instant.parse("2026-01-01T00:00:00Z"),
+                org.example.workersafety_server.entity.EventType.ABNORMAL_VITAL, "ANDROID_HEART_RATE");
+        var pool = Executors.newFixedThreadPool(2);
+        var start = new CountDownLatch(1);
+        try {
+            var a = pool.submit(() -> { start.await(); return service.createEvent(id, request); });
+            var b = pool.submit(() -> { start.await(); return service.createEvent(id, request); });
+            start.countDown();
+            assertThat(a.get(15, TimeUnit.SECONDS).eventId()).isEqualTo(b.get(15, TimeUnit.SECONDS).eventId());
+            assertThat(jdbc.queryForObject("SELECT COUNT(*) FROM safety_events WHERE worker_id = ?", Integer.class, id))
+                    .isEqualTo(1);
+        } finally { pool.shutdownNow(); }
+    }
+
+    private org.springframework.test.web.servlet.ResultActions reportMonitoring(String token, String state, String at) throws Exception {
+        return mvc.perform(post("/api/worker/me/status").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(json.writeValueAsString(Map.of("monitoringStatus", state, "reportedAt", at))));
+    }
+
+    @Test void fiveMinuteHeartAssessmentsRemainSeparateFromRiskEventsAndTransportTime() throws Exception {
+        MockHttpSession admin = adminSession();
+        JsonNode created = createWorker(admin);
+        long id = created.get("workerId").asLong();
+        String token = login(id, created.get("temporaryPassword").asString());
+        Instant first = Instant.ofEpochMilli(Instant.now().minusSeconds(600).toEpochMilli());
+        Instant next = first.plusSeconds(300);
+        mvc.perform(get("/api/worker/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.heartRateDataStatus").value("NOT_RECEIVED"));
+        reportHeartAssessment(token, "NORMAL", first, first).andExpect(status().isOk())
+                .andExpect(jsonPath("$.heartRateStatus").value("NORMAL"));
+        reportHeartAssessment(token, "DANGER", next, next).andExpect(status().isOk())
+                .andExpect(jsonPath("$.heartRateStatus").value("DANGER"))
+                .andExpect(jsonPath("$.heartRateDataStatus").value("FRESH"));
+        // Monitoring-only updates and duplicate samples must not refresh the measurement time.
+        reportMonitoring(token, "RUNNING", next.plusSeconds(1).toString()).andExpect(status().isOk())
+                .andExpect(jsonPath("$.measuredAt").value(next.toString()));
+        reportHeartAssessment(token, "DANGER", next.plusSeconds(2), next).andExpect(status().isOk())
+                .andExpect(jsonPath("$.measuredAt").value(next.toString()));
+        reportHeartAssessment(token, "NORMAL", next.plusSeconds(3), first).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("HEART_RATE_OUT_OF_ORDER"));
+        reportHeartAssessment(token, "NORMAL", next.plusSeconds(3), next).andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("HEART_RATE_CONFLICT"));
+        mvc.perform(post("/api/worker/me/status").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(
+                        Map.of("monitoringStatus", "RUNNING", "reportedAt", next.plusSeconds(3).toString(),
+                                "heartRateStatus", "NORMAL")))).andExpect(status().isBadRequest());
+        mvc.perform(post("/api/worker/me/status").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(
+                        Map.of("monitoringStatus", "RUNNING", "reportedAt", next.plusSeconds(3).toString(),
+                                "measuredAt", next.toString())))).andExpect(status().isBadRequest());
+        mvc.perform(get("/api/admin/events").session(admin).param("workerId", Long.toString(id)))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(0));
+        // Only the explicit incident creates an event.
+        mvc.perform(post("/api/worker/events").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(
+                        Map.of("eventType", "ABNORMAL_VITAL", "alertSender", "ANDROID_HEART_RATE",
+                                "time", next.toString())))).andExpect(status().isCreated());
+        Instant recovered = first.plusSeconds(599);
+        reportHeartAssessment(token, "NORMAL", recovered, recovered).andExpect(status().isOk());
+        mvc.perform(get("/api/admin/events").session(admin).param("workerId", Long.toString(id)).param("processed", "false"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(1));
+        jdbc.update("UPDATE worker_profiles SET heart_rate_measured_at = ? WHERE worker_id = ?",
+                Instant.now().minusSeconds(421).toEpochMilli(), id);
+        mvc.perform(get("/api/worker/me").header("Authorization", "Bearer " + token))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.heartRateDataStatus").value("STALE"));
+        mvc.perform(get("/admin/workers/" + id).session(admin).param("fragment", "live"))
+                .andExpect(status().isOk()).andExpect(content().string(org.hamcrest.Matchers.containsString("만료")));
+    }
+
+    private org.springframework.test.web.servlet.ResultActions reportHeartAssessment(
+            String token, String state, Instant reportedAt, Instant measuredAt) throws Exception {
+        return mvc.perform(post("/api/worker/me/status").header("Authorization", "Bearer " + token)
+                .contentType(MediaType.APPLICATION_JSON).content(json.writeValueAsString(
+                        Map.of("monitoringStatus", "RUNNING", "reportedAt", reportedAt.toString(),
+                                "heartRateStatus", state, "measuredAt", measuredAt.toString()))));
+    }
+
     private MockHttpSession adminSession() throws Exception {
         return (MockHttpSession) mvc.perform(post("/admin/login").with(remoteIp("192.0.2." + (1 + java.util.concurrent.ThreadLocalRandom.current().nextInt(200))))
                         .with(csrf()).param("adminId", ADMIN).param("password", PASSWORD))

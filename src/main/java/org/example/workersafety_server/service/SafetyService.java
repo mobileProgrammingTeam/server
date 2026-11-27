@@ -227,13 +227,91 @@ public class SafetyService {
         eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-deleted", profile.getId()));
     }
 
+    /** Execution/device status only: this method never creates a safety event. */
+    @Transactional
+    public WorkerStatusResult reportWorkerStatus(long id, WorkerStatusReport request) {
+        accounts.findByIdForUpdate(id).orElseThrow(ApiException::unauthorized);
+        WorkerProfile profile = activeProfile(id);
+        Instant receivedAt = now();
+        Instant reportedAt = observationTime(request.reportedAt(), receivedAt);
+        Instant watchAt = null;
+        if (request.devices() != null && !request.devices().isEmpty()) {
+            watchAt = observationTime(request.devices().get(0).lastSeenAt(), receivedAt);
+            if (watchAt.isAfter(reportedAt.plusSeconds(60)))
+                throw ApiException.badRequest("워치 관측 시각을 확인하세요.");
+        }
+        // Heart assessments are independent of transport/monitoring timestamps.
+        if ((request.heartRateStatus() == null) != (request.measuredAt() == null))
+            throw ApiException.badRequest("heartRateStatus와 measuredAt을 함께 보내세요.");
+        Instant measuredAt = request.measuredAt() == null ? null : observationTime(request.measuredAt(), receivedAt);
+        if (measuredAt != null) {
+            if (measuredAt.isAfter(reportedAt.plusSeconds(60)))
+                throw ApiException.badRequest("심박 측정 시각을 확인하세요.");
+            Instant oldMeasurement = profile.getHeartRateMeasuredAt();
+            if (oldMeasurement != null && measuredAt.isBefore(oldMeasurement))
+                throw ApiException.conflict("HEART_RATE_OUT_OF_ORDER", "이전 심박 판정은 반영할 수 없습니다.");
+            if (oldMeasurement != null && measuredAt.equals(oldMeasurement)
+                    && request.heartRateStatus() != profile.getHeartRateStatus())
+                throw ApiException.conflict("HEART_RATE_CONFLICT", "같은 측정 시각의 심박 상태가 다릅니다.");
+        }
+        Instant previous = profile.getStatusReportedAt();
+        if (previous != null && reportedAt.isBefore(previous))
+            throw ApiException.conflict("WORKER_STATUS_OUT_OF_ORDER", "이전 상태 보고는 반영할 수 없습니다.");
+        if (previous != null && reportedAt.equals(previous)
+                && request.monitoringStatus() != profile.getMonitoringStatus())
+            throw ApiException.conflict("WORKER_STATUS_CONFLICT", "같은 시각에 다른 감시 상태가 보고되었습니다.");
+        if (measuredAt != null) {
+            profile.setHeartRateStatus(request.heartRateStatus());
+            profile.setHeartRateMeasuredAt(measuredAt);
+        }
+        profile.setMonitoringStatus(request.monitoringStatus());
+        profile.setStatusReportedAt(reportedAt);
+        profile.setLastSeenAt(receivedAt);
+        if (watchAt != null && (profile.getWatchLastSeenAt() == null || watchAt.isAfter(profile.getWatchLastSeenAt())))
+            profile.setWatchLastSeenAt(watchAt);
+        workers.saveAndFlush(profile);
+        eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-status-changed", id));
+        return new WorkerStatusResult(profile.getMonitoringStatus(), profile.getStatusReportedAt(),
+                profile.getLastSeenAt(), profile.getWatchLastSeenAt(), profile.getHeartRateStatus(),
+                profile.getHeartRateMeasuredAt(), HeartRateReportPolicy.freshness(profile.getHeartRateMeasuredAt(), receivedAt));
+    }
+
+    private Instant observationTime(Instant value, Instant receivedAt) {
+        try {
+            Instant normalized = Instant.ofEpochMilli(value.toEpochMilli());
+            if (!normalized.isAfter(Instant.EPOCH) || normalized.isAfter(receivedAt.plusSeconds(60)))
+                throw ApiException.badRequest("보고 시각을 확인하세요.");
+            return normalized;
+        } catch (ArithmeticException ex) {
+            throw ApiException.badRequest("보고 시각을 확인하세요.");
+        }
+    }
+
     @Transactional
     public EventInfo createEvent(long id, NewEvent request) {
+        // Preserve the app's existing event contract. Heart-rate risk arrives ONLY here.
+        boolean heartRate = request.eventType() == EventType.ABNORMAL_VITAL
+                && "ANDROID_HEART_RATE".equals(request.alertSender().trim());
+        accounts.findByIdForUpdate(id).orElseThrow(ApiException::unauthorized);
+        WorkerProfile profile = activeProfile(id);
+        Instant receivedAt = now();
+        Instant occurredAt = heartRate ? observationTime(request.time(), receivedAt)
+                : Instant.ofEpochMilli(request.time().toEpochMilli());
+        profile.setLastSeenAt(receivedAt);
+        if (heartRate) {
+            var duplicate = events.findFirstByWorker_IdAndEventTypeAndAlertSenderAndOccurredAtOrderByIdAsc(
+                    id, EventType.ABNORMAL_VITAL, "ANDROID_HEART_RATE", occurredAt);
+            if (duplicate.isPresent()) {
+                eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-status-changed", id));
+                return eventInfo(duplicate.get());
+            }
+        }
         SafetyEvent event = new SafetyEvent();
-        event.setWorker(activeProfile(id)); event.setOccurredAt(Instant.ofEpochMilli(request.time().toEpochMilli())); event.setReceivedAt(now());
+        event.setWorker(profile); event.setOccurredAt(occurredAt); event.setReceivedAt(receivedAt);
         event.setEventType(request.eventType()); event.setAlertSender(request.alertSender().trim());
         SafetyEvent saved = events.saveAndFlush(event);
         eventPublisher.publishEvent(AdminDataChangedEvent.event("event-created", saved.getId(), id));
+        eventPublisher.publishEvent(AdminDataChangedEvent.worker("worker-status-changed", id));
         return eventInfo(saved);
     }
 
@@ -294,7 +372,7 @@ public class SafetyService {
         if (id <= 0) throw ApiException.badRequest("이벤트 ID를 확인하세요.");
         return events.findById(id).orElseThrow(() -> ApiException.notFound("EVENT_NOT_FOUND", "이벤트를 찾을 수 없습니다."));
     }
-    private WorkerInfo workerInfo(WorkerProfile p) { return new WorkerInfo(p.getId(), p.getWorkerName(), p.getSex(), p.getAge(), p.getAccount().isEnabled(), p.getAccount().getLoginLockedAt() != null, p.getAccount().getDeletedAt() != null); }
+    private WorkerInfo workerInfo(WorkerProfile p) { return new WorkerInfo(p.getId(), p.getWorkerName(), p.getSex(), p.getAge(), p.getAccount().isEnabled(), p.getAccount().getLoginLockedAt() != null, p.getAccount().getDeletedAt() != null, p.getMonitoringStatus(), p.getStatusReportedAt(), p.getLastSeenAt(), p.getWatchLastSeenAt(), p.getHeartRateStatus(), p.getHeartRateMeasuredAt(), HeartRateReportPolicy.freshness(p.getHeartRateMeasuredAt(), now())); }
     private EventInfo eventInfo(SafetyEvent e) { return new EventInfo(e.getId(), e.getWorker().getId(), e.getWorker().getWorkerName(), e.getOccurredAt(), e.getReceivedAt(), e.getEventType(), e.getAlertSender(), e.getProcessedAt(), e.getProcessedBy() == null ? null : e.getProcessedBy().getId(), e.getAdminMemo()); }
     private Pageable pageable(int page, int size, Sort sort) {
         if (page < 0 || size < 1 || size > 100) throw ApiException.badRequest("페이지 값을 확인하세요.");

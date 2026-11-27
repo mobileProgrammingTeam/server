@@ -455,7 +455,16 @@
         setTimeout(() => URL.revokeObjectURL(url), 1000);
     }
 
+    let freshnessTimer;
+    function startFreshnessRefresh() {
+        if (!['workers', 'worker-detail'].includes(pageType) || freshnessTimer) return;
+        freshnessTimer = window.setInterval(() => {
+            if (document.visibilityState === 'visible') refreshCurrentPage();
+        }, 30000);
+    }
+
     if (pageType) {
+        startFreshnessRefresh();
         if (window.EventSource) connectStream();
         else updateStatus('이 브라우저에서는 실시간 자동 갱신을 사용할 수 없습니다.', true);
         document.addEventListener('visibilitychange', () => {
@@ -465,12 +474,15 @@
             }
         });
         window.addEventListener('pagehide', () => {
+            clearInterval(freshnessTimer);
+            freshnessTimer = null;
             closeStream();
             requestController?.abort();
             clearTimeout(mergeTimer);
         });
         window.addEventListener('pageshow', event => {
             if (event.persisted) {
+                startFreshnessRefresh();
                 connectStream();
                 refreshCurrentPage();
             }

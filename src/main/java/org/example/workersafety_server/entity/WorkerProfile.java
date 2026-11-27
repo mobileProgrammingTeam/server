@@ -12,4 +12,16 @@ public class WorkerProfile {
     @Column(name = "worker_name", nullable = false) private String workerName;
     private String sex;
     private Integer age;
+    @Enumerated(EnumType.STRING) @Column(name = "monitoring_status")
+    private MonitoringStatus monitoringStatus;
+    @Column(name = "status_reported_at")
+    private java.time.Instant statusReportedAt;
+    @Column(name = "last_seen_at")
+    private java.time.Instant lastSeenAt;
+    @Column(name = "watch_last_seen_at")
+    private java.time.Instant watchLastSeenAt;
+    @Enumerated(EnumType.STRING) @Column(name = "heart_rate_status")
+    private HeartRateStatus heartRateStatus;
+    @Column(name = "heart_rate_measured_at")
+    private java.time.Instant heartRateMeasuredAt;
 }
